@@ -2,6 +2,11 @@
 const $ = (s, r = document) => r.querySelector(s);
 const view = $("#view");
 const cardTpl = $("#cardTpl");
+const chipsEl = $("#chips");
+
+/* browse state: genre slug + format slug, and the list the server sends */
+let catalog = {genres: [], formats: []};
+const browsing = {tag: "", cat: ""};
 
 function esc(s){return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function humanSize(n){if(!n)return"";const u=["B","KB","MB","GB","TB"];let i=0;
@@ -99,21 +104,96 @@ function pager(res,base){
   return bar;
 }
 
-/* ---------------- home ---------------- */
+/* ---------------- genre chips ---------------- */
+function chipEl(label,on,onclick,extra){
+  const b=document.createElement("button");
+  b.type="button";b.className="chip"+(on?" on":"")+(extra?" "+extra:"");
+  b.textContent=label;b.onclick=onclick;
+  return b;
+}
+
+function renderChips(){
+  if(!catalog.genres.length)return;      // the row keeps its height meanwhile
+  chipsEl.replaceChildren();
+  chipsEl.appendChild(chipEl("All",!browsing.tag,()=>{location.hash="#/latest";}));
+  catalog.genres.forEach(g=>{
+    chipsEl.appendChild(chipEl(g.name,browsing.tag===g.slug,
+      ()=>{location.hash="#/g/"+encodeURIComponent(g.slug);}));
+  });
+  const fmt=catalog.formats.find(f=>f.slug===browsing.cat);
+  chipsEl.appendChild(chipEl(fmt?fmt.name:"Format",!!fmt,openFormatSheet,"chip-end"));
+  const on=chipsEl.querySelector(".chip.on");
+  if(on)on.scrollIntoView({inline:"center",block:"nearest"});
+}
+
+function openFormatSheet(){
+  closeSheet();
+  const wrap=document.createElement("div");wrap.className="sheet-wrap";wrap.id="sheet";
+  wrap.onclick=e=>{if(e.target===wrap)closeSheet();};
+  const panel=document.createElement("div");panel.className="sheet";
+
+  const head=document.createElement("div");head.className="sec-title";head.textContent="Format";
+  panel.appendChild(head);
+
+  const list=document.createElement("div");list.className="sheet-list";
+  const pick=slug=>{browsing.cat=slug;closeSheet();renderChips();reloadBrowse();};
+  list.appendChild(chipEl("All formats",!browsing.cat,()=>pick("")));
+  catalog.formats.forEach(f=>{
+    list.appendChild(chipEl(f.name,browsing.cat===f.slug,()=>pick(f.slug)));
+  });
+  panel.appendChild(list);
+
+  const close=document.createElement("button");
+  close.type="button";close.className="btn btn-ghost";close.textContent="Close";
+  close.onclick=closeSheet;
+  panel.appendChild(close);
+
+  wrap.appendChild(panel);document.body.appendChild(wrap);
+}
+function closeSheet(){const s=$("#sheet");if(s)s.remove();}
+
+function reloadBrowse(){
+  const h=location.hash||"#/";
+  const m=h.match(/^#\/g\/([^/]+)(?:\/(\d+))?$/);
+  if(m)browse(decodeURIComponent(m[1]),1);
+  else if(/^#\/(latest)?(\/?$|\/\d+$)/.test(h)||h==="#/")browse("",1);
+}
+
+/* ---------------- home / genre browse ---------------- */
+function browseTitle(){
+  const g=catalog.genres.find(x=>x.slug===browsing.tag);
+  const f=catalog.formats.find(x=>x.slug===browsing.cat);
+  if(g&&f)return`${g.name} / ${f.name}`;
+  if(g)return g.name;
+  if(f)return`New in ${f.name}`;
+  return"New uploads";
+}
+
 async function home(page=1){
+  return browse("",page);
+}
+
+async function browse(tag,page=1){
   const t=beginRender();
+  browsing.tag=tag||"";
+  chipsEl.hidden=false;
+  renderChips();
   view.innerHTML="";
   view.appendChild(spinner());
   try{
-    const res=await getJSON("/api/latest?limit=24&page="+page);
+    const res=await getJSON("/api/browse?tag="+encodeURIComponent(browsing.tag)
+                           +"&cat="+encodeURIComponent(browsing.cat)
+                           +"&limit=30&page="+page);
     if(stale(t))return;
     view.innerHTML="";
-    view.appendChild(section("New uploads",res.items,"No uploads found."));
-    const p=pager(res,"#/latest");
+    view.appendChild(section(browseTitle(),res.items,"Nothing here yet."));
+    const base=browsing.tag?"#/g/"+encodeURIComponent(browsing.tag):"#/latest";
+    const p=pager(res,base);
     if(p)view.appendChild(p);
   }catch(e){
     if(stale(t))return;
-    view.innerHTML=""; view.appendChild(section("New uploads",[],"Couldn't load: "+e.message));
+    view.innerHTML="";
+    view.appendChild(section(browseTitle(),[],"Couldn't load: "+e.message));
   }
 }
 
@@ -274,13 +354,29 @@ function handToBrowser(url,name){
 }
 
 /* ---------------- router ---------------- */
+async function loadCatalog(){
+  try{
+    const [g,f]=await Promise.all([getJSON("/api/genres"),getJSON("/api/formats")]);
+    catalog={genres:g.genres||[],formats:f.formats||[]};
+  }catch(e){
+    catalog={genres:[],formats:[]};
+    chipsEl.hidden=true;          // no catalog: hide the empty row entirely
+  }
+  renderChips();
+}
+
 function route(){
   const h=location.hash||"#/";
   let m;
+  closeSheet();
   if((m=h.match(/^#\/p\/(.+)$/))){
+    chipsEl.hidden=true;
     detail(decodeURIComponent(m[1]));
   }else if((m=h.match(/^#\/s\/([^/]+)(?:\/(\d+))?$/))){
+    chipsEl.hidden=true;
     search(decodeURIComponent(m[1]),+(m[2]||1));
+  }else if((m=h.match(/^#\/g\/([^/]+)(?:\/(\d+))?$/))){
+    browse(decodeURIComponent(m[1]),+(m[2]||1));
   }else if((m=h.match(/^#\/latest(?:\/(\d+))?$/))){
     home(+(m[1]||1));
   }else{
@@ -297,4 +393,5 @@ $("#searchForm").addEventListener("submit",e=>{
   if(!q)return;
   location.hash="#/s/"+encodeURIComponent(q);
 });
-route();
+/* chips before first paint: the genre row must not pop in late */
+loadCatalog().then(route);

@@ -12,6 +12,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ..catalog import browse, formats, genres, public
 from ..config import BASE
 from ..content import parse_post_view
 from ..download import resolve_info
@@ -161,6 +162,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(page_payload([], page, limit, 0, 0))
         self._json(search_results(query, limit, page))
 
+    def _ep_genres(self, q):
+        self._json({"genres": public(genres())})
+
+    def _ep_formats(self, q):
+        self._json({"formats": public(formats())})
+
+    def _ep_browse(self, q):
+        self._json(browse(_str_param(q, "tag"), _str_param(q, "cat"),
+                          _int_param(q, "limit", 24), _int_param(q, "page", 1)))
+
     def _ep_post(self, q):
         pid = parse_ref(_str_param(q, "id"))
         if not pid:
@@ -231,6 +242,9 @@ ROUTES = {
     "/style.css": Handler._ep_css,
     "/api/latest": Handler._ep_latest,
     "/api/search": Handler._ep_search,
+    "/api/genres": Handler._ep_genres,
+    "/api/formats": Handler._ep_formats,
+    "/api/browse": Handler._ep_browse,
     "/api/post": Handler._ep_post,
     "/api/resolve": Handler._ep_resolve,
     "/api/file": Handler._ep_file,
@@ -242,7 +256,9 @@ def warm_cache(limit=24):
     """Prefetch the landing page so the first browser hit is already cached."""
     try:
         latest(limit)
-        logger.info("WARM latest(%d) ready", limit)
+        # the chip row needs these before the first paint, not after it
+        logger.info("WARM catalog: %d genres, %d formats",
+                    len(genres()), len(formats()))
     except Exception as e:
         logger.warning("WARM failed: %s", e)
 
