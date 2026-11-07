@@ -1,0 +1,8 @@
+name = "rink-keepalive"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# 5 minutes: comfortably inside Render's ~15 minute idle spin-down, and one
+# missed tick still leaves a slot before the service would sleep.
+[triggers]
+crons = ["*/5 * * * *"]

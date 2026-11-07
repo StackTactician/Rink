@@ -1,0 +1,39 @@
+name: keepalive
+
+# Render free web services spin down after ~15 minutes without traffic.
+# This pokes the API on a cron so the instance stays warm.
+#
+# Caveats that make this a weak guarantee:
+#   - GitHub's shortest schedule interval is 5 minutes, and scheduled runs are
+#     delayed during high load (especially at the top of the hour). A */10 run
+#     can land 20+ minutes late on a bad day, which is past Render's spin-down.
+#   - Actions bills each job rounded up to the nearest minute. At */10 that is
+#     ~144 jobs/day = ~4,300 minutes/month, against the 2,000/month included
+#     with GitHub Free for private repos.
+#   - This pings /api/formats, not /, so a 200 proves the whole stack works.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: ping rink
+        run: |
+          url="https://rink.onrender.com/api/formats"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 "$url")
+            echo "attempt $i -> $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "render did not answer 200 within 3 attempts"
+          exit 1
