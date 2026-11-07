@@ -295,6 +295,42 @@ function toast(msg,cls){
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),3500);
 }
 
+/* Release year from the title: "The Odyssey (2026)" -> "2026". The post date
+   is when it was uploaded, which is a different fact and shown separately. */
+function yearOf(title){
+  const m=(title||"").match(/\((\d{4})\)/);
+  return m?m[1]:"";
+}
+
+/* Release quality lives in the file name, not in any API field. */
+function qualityOf(lk){
+  let u="";
+  try{u=decodeURIComponent((lk&&lk.url)||"");}catch(e){u=(lk&&lk.url)||"";}
+  const m=u.match(/\b(2160p|1440p|1080p|720p|480p|360p|4K|WEB[-_]?Rip|WEB[-_]?DL|BluRay|BRRip|HDRip|HDTV|DVDRip)\b/i);
+  return m?m[1]:"";
+}
+
+/* Group an episode list by season when every link carries SxxExx. Returns
+   null for a film or a flat file list, so the caller keeps the old layout. */
+function seasonGroups(links){
+  const parsed=links.map(lk=>{
+    let u="";
+    try{u=decodeURIComponent(lk.url||"");}catch(e){u=lk.url||"";}
+    const m=u.match(/S(\d{1,2})E(\d{1,3})/i);
+    return m?{season:+m[1],episode:+m[2]}:null;
+  });
+  if(!parsed.length||parsed.some(x=>!x))return null;
+  const bySeason=new Map();
+  links.forEach((lk,i)=>{
+    const s=parsed[i].season;
+    if(!bySeason.has(s))bySeason.set(s,[]);
+    bySeason.get(s).push(lk);
+  });
+  return [...bySeason.entries()]
+    .sort((a,b)=>a[0]-b[0])
+    .map(([season,ls])=>({season,links:ls}));
+}
+
 async function detail(id){
   const t=beginRender();
   view.innerHTML=""; view.appendChild(spinner("Loading..."));
@@ -326,47 +362,111 @@ async function detail(id){
 
   // right column
   const col=document.createElement("div");
+
+  const hrow=document.createElement("div");hrow.className="d-hrow";
   const h1=document.createElement("h1");h1.className="d-title";h1.textContent=p.title;
-  col.appendChild(h1);
+  hrow.appendChild(h1);hrow.appendChild(starEl(p));
+  col.appendChild(hrow);
+
+  // type, release year, origin format, release quality: four different facts,
+  // each from a different place (catalog, title, categories, filename)
   const sub=document.createElement("div");sub.className="d-sub";
-  const bits=[];const k=kind(p.title);if(k)bits.push(k);if(p.date)bits.push(p.date);
+  const bits=[];const k=kind(p.title);if(k)bits.push(k);
+  const yr=yearOf(p.title);if(yr)bits.push(yr);
+  (p.formats||[]).forEach(f=>bits.push(f.name));
+  const qual=qualityOf(p.links[0]);if(qual)bits.push(qual);
   sub.textContent=bits.join(" / ");col.appendChild(sub);
+
+  if(p.date){const added=document.createElement("div");added.className="d-added";
+    added.textContent="added "+p.date;col.appendChild(added);}
+
+  if((p.genres||[]).length){
+    const gc=document.createElement("div");gc.className="d-genres";
+    p.genres.forEach(g=>{
+      const a=document.createElement("a");a.className="chip";a.textContent=g.name;
+      a.href="#/g/"+encodeURIComponent(g.slug);
+      gc.appendChild(a);
+    });
+    col.appendChild(gc);
+  }
+
   if(p.synopsis){const s=document.createElement("p");s.className="syn";s.textContent=p.synopsis;
     col.appendChild(s);}
 
-  // one file needs no heading; several are episodes or just files
-  if(p.links.length>1){
-    const epOnly=p.links.every(lk=>/^episode\b/i.test(lk.label||""));
-    const dlh=document.createElement("div");dlh.className="dl-head";
-    dlh.textContent=epOnly?"Episodes":"Files";
-    col.appendChild(dlh);
+  const sizeEls=new Map();
+  const status=document.createElement("div");status.className="prog-txt";
+  let activeBtn=null,activeLab=null;
+
+  function linkList(links){
+    const list=document.createElement("div");list.className="dl-list";
+    links.forEach(lk=>{
+      const row=document.createElement("div");row.className="dl-row";
+      const info=document.createElement("div");info.className="dl-ep";
+      const l=document.createElement("div");l.className="l";
+      l.textContent=lk.label||lk.text||"File";
+      info.appendChild(l);
+      // label and size live in separate spans: the label changes during the
+      // download, the size must survive it
+      const btn=document.createElement("button");btn.className="btn btn-dl";
+      const lab=document.createElement("span");lab.className="dl-lbl";lab.textContent="Download";
+      const sz=document.createElement("span");sz.className="dl-size";
+      btn.appendChild(lab);btn.appendChild(sz);
+      sizeEls.set(lk.url,sz);
+      btn.onclick=()=>startDl(lk,btn,lab,status);
+      row.appendChild(info);row.appendChild(btn);list.appendChild(row);
+    });
+    return list;
   }
 
-  const list=document.createElement("div");list.className="dl-list";
-  const status=document.createElement("div");status.className="prog-txt";
-
-  let activeBtn=null;
-
-  p.links.forEach((lk,i)=>{
-    const row=document.createElement("div");row.className="dl-row";
-    const info=document.createElement("div");info.className="dl-ep";
-    const l=document.createElement("div");l.className="l";
-    l.textContent=lk.label||lk.text||"File";
-    info.appendChild(l);
-    const btn=document.createElement("button");btn.className="btn btn-dl";btn.textContent="Download";
-    btn.onclick=()=>startDl(lk,btn,status);
-    row.appendChild(info);row.appendChild(btn);list.appendChild(row);
-  });
-
-  col.appendChild(list);
+  const groups=seasonGroups(p.links);
+  if(groups){
+    groups.forEach(grp=>{
+      const h=document.createElement("div");h.className="dl-head";
+      h.textContent="Season "+grp.season;
+      col.appendChild(h);col.appendChild(linkList(grp.links));
+    });
+  }else{
+    // one file needs no heading; several are episodes or just files
+    if(p.links.length>1){
+      const epOnly=p.links.every(lk=>/^episode\b/i.test(lk.label||""));
+      const dlh=document.createElement("div");dlh.className="dl-head";
+      dlh.textContent=epOnly?"Episodes":"Files";
+      col.appendChild(dlh);
+    }
+    col.appendChild(linkList(p.links));
+  }
   col.appendChild(status);
   d.appendChild(col);
   wrap.appendChild(d);
   view.innerHTML="";view.appendChild(wrap);
 
-  async function startDl(lk,btn,txt){
-    if(activeBtn)activeBtn.disabled=false;
-    activeBtn=btn;btn.disabled=true;btn.textContent="Resolving...";
+  // sizes arrive after the page is usable, three at a time: each one is a
+  // round trip to the file host, and a 12-episode series must not block paint
+  fillSizes(t,p.links);
+
+  async function fillSizes(token,links){
+    const LIMIT=3;
+    let i=0;
+    async function worker(){
+      while(i<links.length){
+        if(stale(token))return;
+        const lk=links[i++];
+        const el=sizeEls.get(lk.url);
+        if(!el)continue;
+        try{
+          const r=await fetch(apiUrl("/api/size?url="+encodeURIComponent(lk.url)));
+          const j=await r.json();
+          if(stale(token))return;
+          if(j.size)el.textContent=j.size;
+        }catch(e){/* no size is fine: the button still works */}
+      }
+    }
+    await Promise.all(Array.from({length:Math.min(LIMIT,links.length)},worker));
+  }
+
+  async function startDl(lk,btn,lab,txt){
+    if(activeBtn){activeBtn.disabled=false;if(activeLab)activeLab.textContent="Download";}
+    activeBtn=btn;activeLab=lab;btn.disabled=true;lab.textContent="Resolving...";
     txt.classList.add("on");
     try{
       // 1) ask the server to resolve the 2-step redirect to a direct URL
@@ -382,12 +482,12 @@ async function detail(id){
       handToBrowser(apiUrl("/api/file?url="+encodeURIComponent(j.direct)
                           +"&name="+encodeURIComponent(j.name)),j.name);
 
-      btn.textContent="Downloading...";
+      lab.textContent="Downloading...";
       txt.textContent=(j.size?humanSize(j.size)+" - ":"")+"saving to your device";
       toast("Download started","ok");
-      setTimeout(()=>{btn.textContent="Download again";btn.disabled=false;},2000);
+      setTimeout(()=>{lab.textContent="Download again";btn.disabled=false;},2000);
     }catch(e){
-      btn.textContent="Retry";
+      lab.textContent="Retry";
       txt.textContent="Error: "+e.message;
       toast("Download failed","err");
       btn.disabled=false;

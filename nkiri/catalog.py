@@ -102,6 +102,32 @@ def public(rows):
     return [{k: v for k, v in r.items() if k != "id" and k != "ids"} for r in rows]
 
 
+def genre_names(ids):
+    """Tag ids -> [{slug, name}], in catalog order, each genre once."""
+    by_id = {}
+    for g in genres():
+        for i in g["ids"]:
+            by_id[i] = g
+    seen, out = set(), []
+    for i in ids or ():
+        g = by_id.get(i)
+        if g and g["slug"] not in seen:
+            seen.add(g["slug"])
+            out.append({"slug": g["slug"], "name": g["name"]})
+    return out
+
+
+def format_names(ids):
+    """Category ids -> [{slug, name}], in the order the post lists them."""
+    by_id = {f["id"]: f for f in formats()}
+    out = []
+    for i in ids or ():
+        f = by_id.get(i)
+        if f:
+            out.append({"slug": f["slug"], "name": f["name"]})
+    return out
+
+
 def find(rows, slug):
     for row in rows:
         if row["slug"] == slug:

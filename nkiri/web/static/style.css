@@ -217,10 +217,19 @@ main{
   font-size:clamp(21px,6vw,28px);font-weight:900;line-height:1.12;
   letter-spacing:-.01em;margin:0 0 8px;
 }
+.d-hrow{display:flex;align-items:flex-start;gap:10px}
+.d-hrow .d-title{flex:1;min-width:0}
+.d-hrow .star{position:static;flex:0 0 auto;margin-top:2px}
 .d-sub{
-  color:var(--mut);font-size:11px;margin-bottom:18px;
+  color:var(--mut);font-size:11px;margin-bottom:6px;
   text-transform:uppercase;letter-spacing:.14em;
 }
+.d-added{
+  color:#6f6c67;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;margin:0 0 16px;
+}
+.d-genres{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px}
+.d-genres .chip{text-decoration:none}
 .syn{
   color:#c9c5bf;font-size:14px;line-height:1.6;
   background:var(--panel);border-left:4px solid var(--acc);
@@ -249,7 +258,17 @@ main{
 }
 .btn:active{filter:brightness(.85)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-.btn-dl{background:var(--acc);color:var(--acc-ink);width:100%}
+/* label left, size right: the size is a hint, not the action */
+.btn-dl{
+  background:var(--acc);color:var(--acc-ink);width:100%;
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;text-align:left;
+}
+.dl-size{
+  font-size:10px;font-weight:700;letter-spacing:.06em;
+  opacity:.72;white-space:nowrap;
+}
+.dl-size:empty{display:none}
 .btn-ghost{background:transparent;color:var(--txt);border:2px solid var(--line-hi)}
 .back{
   display:inline-block;margin-bottom:16px;

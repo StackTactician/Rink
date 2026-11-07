@@ -13,10 +13,11 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from ..catalog import browse, formats, genres, public
+from ..catalog import browse, format_names, formats, genre_names, genres, public
 from ..config import BASE
 from ..content import parse_post_view
-from ..download import direct_url_allowed, resolve_info, resolve_target_allowed
+from ..download import (direct_url_allowed, landing_size, resolve_info,
+                        resolve_target_allowed)
 from ..media import fetch_image, image_allowed, proxy_url
 from ..net import open_stream
 from ..posts import get_post, latest, page_payload, search_results
@@ -217,7 +218,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found"}, 404)
         post = parse_post_view(get_post(pid))
         post["poster"] = proxy_url(post.get("poster"))
+        post["genres"] = genre_names(post.pop("tag_ids", []))
+        post["formats"] = format_names(post.pop("cat_ids", []))
         return self._json(post)
+
+    def _ep_size(self, q):
+        """File size for one download link, read off its landing page."""
+        url = _str_param(q, "url")
+        if not url:
+            return self._json({"error": "missing url"}, 400)
+        if not resolve_target_allowed(url):
+            return self._json({"error": "url not allowed"}, 400)
+        return self._json(landing_size(url))
 
     def _ep_resolve(self, q):
         url = _str_param(q, "url")
@@ -309,6 +321,7 @@ ROUTES = {
     "/api/browse": Handler._ep_browse,
     "/api/post": Handler._ep_post,
     "/api/resolve": Handler._ep_resolve,
+    "/api/size": Handler._ep_size,
     "/api/file": Handler._ep_file,
     "/api/img": Handler._ep_img,
 }

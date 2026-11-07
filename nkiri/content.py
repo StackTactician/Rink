@@ -106,4 +106,8 @@ def parse_post_view(post):
         "poster": post.get("poster"),
         "synopsis": extract_synopsis(content),
         "links": find_download_links(content),
+        # ids only: the web layer maps them to names through the cached
+        # catalog rather than importing it here and closing the cycle
+        "tag_ids": post.get("tags") or [],
+        "cat_ids": post.get("categories") or [],
     }

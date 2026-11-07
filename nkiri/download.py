@@ -12,9 +12,11 @@ import re
 import subprocess
 import urllib.parse
 
+from .cache import TTLCache
 from .config import BASE, UA
 from .errors import DownloadError, NkiriError
 from .net import head_size, http_get, post_form
+from .text import parse_size
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,33 @@ def resolve_info(link_url, referer=BASE + "/"):
     return {"direct": direct, "name": name, "size": size}
 
 
+#: the landing page prints the size as  <span class="statd">size</span><span>437.9 MB</span>
+_SIZE_RE = re.compile(r'<span class="statd">size</span>\s*<span>([^<]+)</span>', re.I)
+_size_cache = TTLCache(ttl=3600)
+
+
+def landing_size(url):
+    """File size from a download link's landing page.
+
+    One GET: the size is printed on the page the link already points at, so
+    this skips the 2-step postback that resolve_direct needs. Cached, because
+    a detail page asks for every link at once.
+    """
+    def fetch():
+        try:
+            raw, _ = http_get(url)
+        except Exception as e:
+            logger.warning("size lookup failed %s: %s", url, e)
+            return {"size": None, "bytes": None}
+        m = _SIZE_RE.search(raw.decode("utf-8", "ignore"))
+        if not m:
+            return {"size": None, "bytes": None}
+        text = htmllib.unescape(m.group(1)).strip()
+        return {"size": text, "bytes": parse_size(text)}
+
+    return _size_cache.get_or_set(url, fetch)
+
+
 def download_file(direct, dest, referer, quiet=True):
     """Fetch direct -> dest with curl (resumable). Returns bytes written."""
     cmd = ["curl", "-sS", "-L", "-f", "-C", "-", "-A", UA, "-e", referer,
@@ -149,5 +178,5 @@ def download_file(direct, dest, referer, quiet=True):
 
 
 __all__ = ["resolve_direct", "resolve_info", "filename_for", "download_file",
-           "resolve_target_allowed", "direct_url_allowed",
+           "landing_size", "resolve_target_allowed", "direct_url_allowed",
            "NkiriError", "DownloadError"]

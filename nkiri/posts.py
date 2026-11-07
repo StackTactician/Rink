@@ -41,7 +41,8 @@ def page_payload(items, page, per_page, total=None, total_pages=None):
 def get_post(post_id):
     """Full post record, including the resolved poster URL."""
     def fetch():
-        data = api_get(f"/posts/{post_id}?_fields=id,title,link,content,date,featured_media")
+        data = api_get(f"/posts/{post_id}?_fields=id,title,link,content,date,"
+                       f"featured_media,categories,tags")
         data["title"] = clean_title(data["title"]["rendered"])
         data["poster"] = media_url(data.get("featured_media"), LARGE)
         return data
