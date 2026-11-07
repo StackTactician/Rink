@@ -1,0 +1,239 @@
+/* Garota Sans, self-hosted and stripped of its broken glyphs.
+   The public woff draws 0-9 as arrows, so the digit glyphs were removed from
+   this copy and unicode-range keeps the face off them: the browser falls back
+   to the system face for numbers, and every number reads as a number.
+   unicode-range notes: 0020-002F punctuation (not '.'/'/' broken), 003A-007E
+   letters+marks, 00A0-00FF latin-1, 2018-201D quotes, 2026 ellipsis. Never
+   0030-0039. */
+@font-face{
+  font-family:"Garota Sans";font-style:normal;font-weight:400;font-display:swap;
+  src:url("/fonts/garota-regular.woff") format("woff");
+  unicode-range:U+0020-002F,U+003A-007E,U+00A0-00FF,U+2018-201D,U+2026;
+}
+@font-face{
+  font-family:"Garota Sans";font-style:normal;font-weight:700;font-display:swap;
+  src:url("/fonts/garota-bold.woff") format("woff");
+  unicode-range:U+0020-002F,U+003A-007E,U+00A0-00FF,U+2018-201D,U+2026;
+}
+
+/* Rink - brutalist mobile UI.
+   Rules: solid colors only, no blur, no translucency, no shadows,
+   two-pixel borders, zero border-radius, uppercase structural labels. */
+
+:root{
+  --bg:#000; --panel:#0b0b0b; --line:#2b2b2b; --line-hi:#3d3d3d;
+  --txt:#f4f1ec; --mut:#8f8b85; --acc:#ff5c33; --acc-ink:#000;
+  --ok:#39d98a; --err:#ff4d5e;
+  --pad:12px;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;overflow-x:hidden}
+body{
+  background:var(--bg); color:var(--txt);
+  font-family:"Garota Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  font-size:16px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  -webkit-text-size-adjust:100%;
+  text-rendering:optimizeSpeed;
+}
+a{color:inherit;text-decoration:none}
+img{display:block;max-width:100%}
+/* break at word boundaries; anywhere only shatters titles mid-word */
+h1,h2,h3,p,div,span{overflow-wrap:break-word;word-break:normal;hyphens:manual}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+
+/* ---------- top bar ---------- */
+.top{
+  position:sticky;top:0;z-index:20;
+  display:flex;align-items:center;gap:8px;
+  padding:8px max(var(--pad),env(safe-area-inset-left))
+          8px max(var(--pad),env(safe-area-inset-right));
+  background:var(--bg);
+  border-bottom:2px solid var(--line);
+}
+.brand{
+  flex:0 0 auto;
+  font-size:20px;font-weight:900;letter-spacing:-.02em;
+  text-transform:uppercase;line-height:1;
+  padding:4px 2px;
+}
+.brand::after{content:".";color:var(--acc)}
+.search{flex:1;display:flex;min-width:0;border:2px solid var(--line)}
+.search input{
+  flex:1;min-width:0;width:100%;
+  background:var(--bg);border:0;outline:0;color:var(--txt);
+  padding:9px 10px;font:inherit;font-size:16px;
+  -webkit-appearance:none;appearance:none;
+}
+.search input::placeholder{color:var(--mut)}
+.search:focus-within{border-color:var(--acc)}
+.search button{
+  flex:0 0 auto;width:auto;min-height:44px;padding:0 14px;
+  background:var(--acc);color:var(--acc-ink);border:0;
+  font-size:12.5px;font-weight:900;letter-spacing:.1em;
+  text-transform:uppercase;cursor:pointer;
+}
+.search button:active{background:var(--txt)}
+
+/* ---------- layout ---------- */
+main{
+  max-width:900px;margin:0 auto;
+  padding:16px max(var(--pad),env(safe-area-inset-left))
+          calc(48px + env(safe-area-inset-bottom))
+          max(var(--pad),env(safe-area-inset-right));
+}
+.sec-title{
+  font-size:11px;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--mut);font-weight:700;
+  margin:0 0 10px;padding-bottom:8px;
+  border-bottom:2px solid var(--line);
+}
+.sec-title:first-child{margin-top:0}
+
+/* ---------- card grid ---------- */
+.grid{
+  display:grid;gap:10px;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
+@media(min-width:560px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}}
+@media(min-width:900px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+.card{
+  display:flex;flex-direction:column;
+  background:var(--panel);border:2px solid var(--line);
+  content-visibility:auto;contain-intrinsic-size:auto 250px;
+}
+.card:active{border-color:var(--acc)}
+.thumb{position:relative;aspect-ratio:2/3;background:#111;overflow:hidden}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.thumb img:not(.on){opacity:0}
+.thumb .ph,.poster .ph{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#3a3a3a;font-weight:900;font-size:13px;
+  letter-spacing:.16em;text-transform:uppercase;
+}
+.meta{padding:8px 8px 10px;border-top:2px solid var(--line)}
+.title{
+  font-size:12.5px;font-weight:700;line-height:1.3;letter-spacing:.01em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;min-height:2.6em;
+}
+.sub{
+  color:var(--mut);font-size:10.5px;margin-top:4px;
+  text-transform:uppercase;letter-spacing:.1em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
+/* ---------- loading / empty ---------- */
+.state{
+  color:var(--mut);padding:32px 0;text-align:center;
+  font-size:12.5px;text-transform:uppercase;letter-spacing:.12em;
+  border:2px dashed var(--line);margin:8px 0;
+}
+.spinner{
+  width:20px;height:20px;margin:0 auto 14px;
+  border:3px solid var(--line);border-top-color:var(--acc);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- detail ---------- */
+.detail{display:block}
+.poster{
+  width:min(200px,48vw);aspect-ratio:2/3;margin:0 auto 18px;
+  background:#111;border:2px solid var(--line);overflow:hidden;position:relative;
+}
+.poster img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.poster img:not(.on){opacity:0}
+.d-title{
+  font-size:clamp(21px,6vw,28px);font-weight:900;line-height:1.12;
+  letter-spacing:-.01em;margin:0 0 8px;
+}
+.d-sub{
+  color:var(--mut);font-size:11px;margin-bottom:18px;
+  text-transform:uppercase;letter-spacing:.14em;
+}
+.syn{
+  color:#c9c5bf;font-size:14px;line-height:1.6;
+  background:var(--panel);border-left:4px solid var(--acc);
+  padding:12px 14px;margin:0 0 22px;
+}
+.dl-head{
+  font-size:11px;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--mut);font-weight:700;margin:0 0 10px;
+  padding-bottom:8px;border-bottom:2px solid var(--line);
+}
+.dl-list{display:flex;flex-direction:column;gap:8px}
+.dl-row{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  background:var(--panel);border:2px solid var(--line);
+  padding:10px 12px;
+}
+.dl-ep{flex:1 1 100%;min-width:0}
+.dl-ep .l{
+  font-size:13px;font-weight:700;letter-spacing:.02em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.btn{
+  border:0;padding:12px 16px;cursor:pointer;
+  font-size:12.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;
+  min-height:44px;flex:0 0 auto;
+}
+.btn:active{filter:brightness(.85)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-dl{background:var(--acc);color:var(--acc-ink);width:100%}
+.btn-ghost{background:transparent;color:var(--txt);border:2px solid var(--line-hi)}
+.back{
+  display:inline-block;margin-bottom:16px;
+  font-size:11.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);
+  border-bottom:2px solid transparent;padding-bottom:2px;cursor:pointer;
+}
+.back:active{color:var(--txt);border-bottom-color:var(--acc)}
+
+/* ---------- pagination ---------- */
+/* one row: [Prev]  page info  [Next] */
+.pager{
+  display:flex;align-items:center;gap:8px;
+  margin:18px 0 4px;
+}
+.pager-info{
+  flex:1 1 auto;min-width:0;
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--mut);text-align:center;padding:0 2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pager .btn-nav{
+  flex:0 0 auto;width:auto;min-height:36px;
+  padding:6px 12px;font-size:11px;letter-spacing:.08em;
+}
+
+/* ---------- download status line ---------- */
+.prog-txt{
+  display:none;margin-top:12px;
+  font-size:11.5px;color:var(--mut);line-height:1.5;
+  border-left:4px solid var(--line-hi);padding:6px 10px;
+}
+.prog-txt.on{display:block}
+
+/* ---------- toast ---------- */
+/* small tag that slides in from the right edge */
+.toast{
+  position:fixed;right:calc(10px + env(safe-area-inset-right));
+  bottom:calc(16px + env(safe-area-inset-bottom));left:auto;
+  transform:translateX(120%);
+  background:var(--bg);border:2px solid var(--acc);color:var(--txt);
+  padding:6px 9px;max-width:min(64vw,230px);text-align:left;
+  font-size:11px;font-weight:700;letter-spacing:.04em;line-height:1.25;
+  opacity:0;pointer-events:none;
+  transition:opacity .12s linear,transform .18s ease-out;
+  z-index:50;
+}
+.toast.on{opacity:1;transform:translateX(0)}
+.toast.ok{border-color:var(--ok)}
+.toast.err{border-color:var(--err)}
+
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
