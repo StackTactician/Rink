@@ -73,7 +73,12 @@ class Handler(BaseHTTPRequestHandler):
         tag = None
         if etag and code == 200:
             tag = '"' + hashlib.sha1(data).hexdigest()[:20] + '"'
-            if self.headers.get("If-None-Match") == tag:
+            # If-None-Match uses weak comparison, and the proxy in front of us
+            # rewrites our ETag to W/"...", so strip the prefix before matching.
+            inm = (self.headers.get("If-None-Match") or "").strip()
+            if inm.startswith("W/"):
+                inm = inm[2:]
+            if inm == tag or inm == "*":
                 self.send_response(304)
                 self.send_header("ETag", tag)
                 self.send_header("Cache-Control", cache)

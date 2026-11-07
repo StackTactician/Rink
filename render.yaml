@@ -9,3 +9,26 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.6
+
+  # A second, neutral home for the same static page. GitHub Pages serves this
+  # repo from the account's custom domain (stacktactician.dev/Rink/), and a
+  # Pages site has exactly one canonical host, so github.io/Rink/ only ever
+  # 301s there. This gives a URL that carries no personal domain.
+  #
+  # config.js resolves the API from location.hostname, so this host gets
+  # https://rink.onrender.com with no change.
+  - type: web
+    name: rink-ui
+    runtime: static
+    plan: free
+    staticPublishPath: ./nkiri/web/static
+    headers:
+      - path: /fonts/*
+        name: Cache-Control
+        value: public, max-age=604800, immutable
+      - path: /*.js
+        name: Cache-Control
+        value: public, max-age=300, must-revalidate
+      - path: /*.css
+        name: Cache-Control
+        value: public, max-age=300, must-revalidate
