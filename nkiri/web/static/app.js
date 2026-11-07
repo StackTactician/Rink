@@ -167,13 +167,15 @@ function renderChips(){
   if(!catalog.genres.length)return;      // the row keeps its height meanwhile
   chipsEl.replaceChildren();
   chipsEl.appendChild(chipEl("All",!browsing.tag,()=>{location.hash="#/latest";}));
+  // second slot, not last: the row scrolls, and 22 genre chips before it
+  // would leave the watchlist permanently off-screen
+  chipsEl.appendChild(chipEl("Watchlist",
+    (location.hash||"").startsWith("#/watchlist"),
+    ()=>{location.hash="#/watchlist";}));
   catalog.genres.forEach(g=>{
     chipsEl.appendChild(chipEl(g.name,browsing.tag===g.slug,
       ()=>{location.hash="#/g/"+encodeURIComponent(g.slug);}));
   });
-  chipsEl.appendChild(chipEl("Watchlist",
-    (location.hash||"").startsWith("#/watchlist"),
-    ()=>{location.hash="#/watchlist";}));
   const fmt=catalog.formats.find(f=>f.slug===browsing.cat);
   chipsEl.appendChild(chipEl(fmt?fmt.name:"Format",!!fmt,openFormatSheet,"chip-end"));
   const on=chipsEl.querySelector(".chip.on");
