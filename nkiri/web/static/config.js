@@ -1,7 +1,10 @@
-/* Where the API lives. Empty means "this same origin", which is right when
-   this process serves the page. When the UI is hosted separately (static
-   hosting), point it at the server instead:
-
-     window.RINK_API = "https://rink.onrender.com";
-*/
-window.RINK_API = "";
+/* Where the API lives.
+   - Served by the Python process itself (localhost, or a LAN IP such as
+     192.168.x.x from a phone): same origin, so empty.
+   - Served from static hosting (Cloudflare Pages): the Render service.
+   - ?api=https://... on the URL overrides either, for one-off testing. */
+window.RINK_API = (
+  location.hostname === "localhost" ||
+  location.hostname === "127.0.0.1" ||
+  /^\d+\.\d+\.\d+\.\d+$/.test(location.hostname)
+) ? "" : "https://rink.onrender.com";
