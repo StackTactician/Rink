@@ -1,5 +1,12 @@
 "use strict";
 const $ = (s, r = document) => r.querySelector(s);
+
+/* Where the API lives. Same origin when the page is served by this process;
+   set window.RINK_API in config.js (or ?api=https://...) when the UI is hosted
+   separately, e.g. static hosting in front of a remote server. */
+const API_BASE = (window.RINK_API
+  || new URLSearchParams(location.search).get("api") || "").replace(/\/+$/, "");
+const apiUrl = p => p.startsWith("/api/") ? API_BASE + p : p;
 const view = $("#view");
 const cardTpl = $("#cardTpl");
 const chipsEl = $("#chips");
@@ -39,10 +46,10 @@ function cardEl(item){
     img.onerror=()=>{
       // one retry, then fall back to the placeholder
       if(!img.dataset.retried){img.dataset.retried="1";
-        setTimeout(()=>{img.src=item.poster+(item.poster.includes("?")?"&":"?")+"r=1";},1200);}
+        setTimeout(()=>{img.src=apiUrl(item.poster)+(item.poster.includes("?")?"&":"?")+"r=1";},1200);}
       else{img.remove();}
     };
-    img.src=item.poster;
+    img.src=apiUrl(item.poster);
     if(img.complete&&img.naturalWidth){img.onload();}
   }else{
     img.remove();
@@ -68,7 +75,7 @@ function spinner(txt){const d=document.createElement("div");d.className="state";
   d.innerHTML='<div class="spinner"></div>'+esc(txt||"Loading...");return d;}
 
 async function getJSON(url){
-  const r=await fetch(url); if(!r.ok)throw new Error((await r.json()).error||r.status);
+  const r=await fetch(apiUrl(url)); if(!r.ok)throw new Error((await r.json()).error||r.status);
   return r.json();
 }
 
@@ -263,7 +270,7 @@ async function detail(id){
     const img=document.createElement("img");img.alt=p.title;
     img.onload=()=>{img.classList.add("on");ph.style.display="none";};
     img.onerror=()=>{img.remove();};
-    img.src=p.poster;
+    img.src=apiUrl(p.poster);
     poster.appendChild(img);
   }
   d.appendChild(poster);
@@ -314,7 +321,7 @@ async function detail(id){
     txt.classList.add("on");
     try{
       // 1) ask the server to resolve the 2-step redirect to a direct URL
-      const r=await fetch("/api/resolve?url="+encodeURIComponent(lk.url)
+      const r=await fetch(apiUrl("/api/resolve?url="+encodeURIComponent(lk.url))
                          +"&referer="+encodeURIComponent(p.url));
       const j=await r.json();
       if(!r.ok)throw new Error(j.error||"resolve failed");
@@ -323,8 +330,8 @@ async function detail(id){
       //    The request stays same-origin (our /api/file proxy) so the browser
       //    saves it as an attachment and streams straight to disk: no blob,
       //    no memory copy, no in-page progress loop.
-      handToBrowser("/api/file?url="+encodeURIComponent(j.direct)
-                    +"&name="+encodeURIComponent(j.name),j.name);
+      handToBrowser(apiUrl("/api/file?url="+encodeURIComponent(j.direct)
+                          +"&name="+encodeURIComponent(j.name)),j.name);
 
       btn.textContent="Downloading...";
       txt.textContent=(j.size?humanSize(j.size)+" - ":"")+"saving to your device";

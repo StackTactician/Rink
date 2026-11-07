@@ -217,6 +217,9 @@ class Handler(BaseHTTPRequestHandler):
     def _ep_css(self, q):
         self._static("style.css", "text/css; charset=utf-8")
 
+    def _ep_config(self, q):
+        self._static("config.js", "application/javascript; charset=utf-8")
+
 def _disposition(name):
     """attachment header, ASCII-safe for old clients + RFC 5987 for the rest."""
     ascii_name = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
@@ -240,6 +243,7 @@ ROUTES = {
     "/index.html": Handler._ep_index,
     "/app.js": Handler._ep_js,
     "/style.css": Handler._ep_css,
+    "/config.js": Handler._ep_config,
     "/api/latest": Handler._ep_latest,
     "/api/search": Handler._ep_search,
     "/api/genres": Handler._ep_genres,
@@ -265,7 +269,8 @@ def warm_cache(limit=24):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    port = int(argv[0]) if argv else 8321
+    # hosts set $PORT; the CLI argument still wins for local runs
+    port = int(argv[0] if argv else os.environ.get("PORT", "8321"))
     setup_logging()
     threading.Thread(target=warm_cache, daemon=True).start()
 

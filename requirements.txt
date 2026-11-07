@@ -1,0 +1,2 @@
+# Rink runs on the standard library alone. This file exists so hosts that
+# insist on installing something have something to install.
