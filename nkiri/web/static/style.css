@@ -139,7 +139,14 @@ main{
   border-top:2px solid var(--line);
   color:var(--mut);font-size:11px;font-weight:700;
   letter-spacing:.12em;text-align:center;
+  display:flex;flex-direction:column;gap:6px;
 }
+/* the motto is a quotation, not a structural label: sentence case, no tracking */
+.foot-motto{
+  font-style:italic;font-weight:400;
+  letter-spacing:.02em;color:#6f6c67;
+}
+.foot-copy{font-size:10px;letter-spacing:.1em;color:#6f6c67}
 
 /* ---------- card grid ---------- */
 .grid{
