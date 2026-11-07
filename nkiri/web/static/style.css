@@ -130,6 +130,17 @@ main{
 }
 .sec-title:first-child{margin-top:0}
 
+/* ---------- footer ---------- */
+.foot{
+  max-width:900px;margin:0 auto;
+  padding:12px max(var(--pad),env(safe-area-inset-left))
+          calc(24px + env(safe-area-inset-bottom))
+          max(var(--pad),env(safe-area-inset-right));
+  border-top:2px solid var(--line);
+  color:var(--mut);font-size:11px;font-weight:700;
+  letter-spacing:.12em;text-align:center;
+}
+
 /* ---------- card grid ---------- */
 .grid{
   display:grid;gap:10px;
