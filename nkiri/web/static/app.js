@@ -400,5 +400,9 @@ $("#searchForm").addEventListener("submit",e=>{
   if(!q)return;
   location.hash="#/s/"+encodeURIComponent(q);
 });
-/* chips before first paint: the genre row must not pop in late */
-loadCatalog().then(route);
+/* Paint the list first, fill the chip row when the catalog lands. Awaiting the
+   catalog here serialised two round trips in front of the first card: genres
+   and formats (~1.2s) had to finish before /api/browse was even requested.
+   renderChips() is a no-op on an empty catalog and runs again on arrival. */
+route();
+loadCatalog();

@@ -5,16 +5,16 @@ name: keepalive
 #
 # Caveats that make this a weak guarantee:
 #   - GitHub's shortest schedule interval is 5 minutes, and scheduled runs are
-#     delayed during high load (especially at the top of the hour). A */10 run
-#     can land 20+ minutes late on a bad day, which is past Render's spin-down.
-#   - Actions bills each job rounded up to the nearest minute. At */10 that is
-#     ~144 jobs/day = ~4,300 minutes/month, against the 2,000/month included
-#     with GitHub Free for private repos.
+#     delayed during high load (especially at the top of the hour). A */5 run
+#     can still land late, so the job retries rather than trusting one tick.
+#   - Actions minutes are free and unmetered on public repos, so */5 costs
+#     nothing. On a private repo this would be ~8,600 minutes/month against
+#     the 2,000 included with GitHub Free.
 #   - This pings /api/formats, not /, so a 200 proves the whole stack works.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:

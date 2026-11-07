@@ -7,6 +7,10 @@
 <meta name="color-scheme" content="dark">
 <title>Rink</title>
 <link rel="preconnect" href="https://thenkiri.com" crossorigin>
+<!-- The API is a different origin from this page. Opening the socket and
+     finishing TLS here overlaps with parsing app.js instead of stalling the
+     first /api call. Harmless when the page is served by the API itself. -->
+<link rel="preconnect" href="https://rink.onrender.com" crossorigin>
 <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>

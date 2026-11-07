@@ -4,6 +4,7 @@ Run:  python3 -m nkiri.web [port]      (default 8321)
 """
 
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -63,8 +64,23 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ responses
 
     def _send(self, code, body, ctype="application/json; charset=utf-8",
-              cache="no-store"):
+              cache="no-store", etag=True):
         data = body.encode("utf-8") if isinstance(body, str) else body
+
+        # A revalidating browser costs one 304 instead of a full body, and the
+        # body is a pure function of the cache state, so a content hash is a
+        # correct validator. Only 200s get one: an error must not be pinned.
+        tag = None
+        if etag and code == 200:
+            tag = '"' + hashlib.sha1(data).hexdigest()[:20] + '"'
+            if self.headers.get("If-None-Match") == tag:
+                self.send_response(304)
+                self.send_header("ETag", tag)
+                self.send_header("Cache-Control", cache)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                return
+
         gzipped = None
         if len(data) >= 512 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
             gzipped = gzip.compress(data, 6)
@@ -77,13 +93,18 @@ class Handler(BaseHTTPRequestHandler):
             data = gzipped
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", cache)
+        if tag:
+            self.send_header("ETag", tag)
         self.send_header("Vary", "Accept-Encoding")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
 
     def _json(self, obj, code=200):
-        self._send(code, json.dumps(obj))
+        # 30s fresh, then serve stale while revalidating in the background: a
+        # repeat navigation paints from cache and the 304 lands behind it.
+        self._send(code, json.dumps(obj),
+                   cache="public, max-age=30, stale-while-revalidate=600")
 
     def _static(self, name, ctype):
         path = os.path.join(STATIC_DIR, name)
@@ -132,6 +153,19 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     # ---------------------------------------------------------------- routes
+
+    def do_HEAD(self):
+        """Render's health check and any uptime pinger may use HEAD."""
+        u = urllib.parse.urlparse(self.path)
+        if u.path in ROUTES or u.path.startswith("/fonts/"):
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
