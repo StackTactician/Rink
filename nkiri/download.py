@@ -5,6 +5,7 @@ the CLI uses `download_file` (curl) to write to disk.
 """
 
 import html as htmllib
+import ipaddress
 import logging
 import os
 import re
@@ -28,6 +29,56 @@ _SITE_TAG_RE = re.compile(
     r"[._\- ]*[\(\[\{]?\s*(?:www\.)?(?:thenkiri\.com|nkiri\.ink|nkiri\.com|"
     r"thenkiri|nkiri|dramakey\.com|dramakey)\s*[\)\]\}]?[._\- ]*",
     re.I)
+
+
+# ------------------------------------------------------------ url validation
+#
+# /api/resolve and /api/file take a URL from the browser and make the server
+# fetch it. Unvalidated, that is an open proxy: it burns the host's egress and,
+# worse, lets a caller reach addresses only the server can see (loopback,
+# private ranges, link-local metadata endpoints). Both endpoints now reject
+# anything outside the file hosts this app actually produces.
+
+FILE_HOST_RE = re.compile(
+    r"(^|\.)(?:downloadwella\.com|mega\.nz|mega\.co\.nz|mediafire\.com|"
+    r"dropbox\.com|dropboxusercontent\.com|drive\.google\.com|"
+    r"googleusercontent\.com)$", re.I)
+
+#: what downloadwella hands back once the 2-step is done
+_DIRECT_PATH_RE = re.compile(r"^/d/", re.I)
+
+
+def _public_host(host):
+    """False for loopback, private, link-local or otherwise non-public hosts."""
+    host = (host or "").lower().strip(".")
+    if (not host or host == "localhost"
+            or host.endswith(".local") or host.endswith(".internal")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True                      # a name: DNS decides, not us
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def resolve_target_allowed(url):
+    """Can /api/resolve be pointed at this URL?"""
+    p = urllib.parse.urlparse(url or "")
+    host = p.hostname or ""
+    return (p.scheme in ("http", "https")
+            and _public_host(host)
+            and bool(FILE_HOST_RE.search(host)))
+
+
+def direct_url_allowed(url):
+    """Can /api/file stream this URL? Stricter: a resolved direct link."""
+    p = urllib.parse.urlparse(url or "")
+    host = p.hostname or ""
+    return (p.scheme in ("http", "https")
+            and _public_host(host)
+            and bool(FILE_HOST_RE.search(host))
+            and bool(_DIRECT_PATH_RE.match(p.path or "")))
 
 
 def resolve_direct(url, referer=BASE + "/"):
@@ -98,4 +149,5 @@ def download_file(direct, dest, referer, quiet=True):
 
 
 __all__ = ["resolve_direct", "resolve_info", "filename_for", "download_file",
+           "resolve_target_allowed", "direct_url_allowed",
            "NkiriError", "DownloadError"]

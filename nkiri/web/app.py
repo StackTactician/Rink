@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ..catalog import browse, formats, genres, public
 from ..config import BASE
 from ..content import parse_post_view
-from ..download import resolve_info
+from ..download import direct_url_allowed, resolve_info, resolve_target_allowed
 from ..media import fetch_image, image_allowed, proxy_url
 from ..net import open_stream
 from ..posts import get_post, latest, page_payload, search_results
@@ -224,6 +224,9 @@ class Handler(BaseHTTPRequestHandler):
         referer = _str_param(q, "referer", BASE + "/")
         if not url:
             return self._json({"error": "missing url"}, 400)
+        if not resolve_target_allowed(url):
+            logger.warning("RESOLVE refused (not a file host): %s", url)
+            return self._json({"error": "url not allowed"}, 400)
         return self._json(resolve_info(url, referer))
 
     def _ep_file(self, q):
@@ -231,6 +234,9 @@ class Handler(BaseHTTPRequestHandler):
         name = _str_param(q, "name", "download")
         if not direct:
             return self._json({"error": "missing url"}, 400)
+        if not direct_url_allowed(direct):
+            logger.warning("STREAM refused (not a direct file url): %s", direct)
+            return self._json({"error": "url not allowed"}, 400)
         logger.info("STREAM request name=%s", name)
         return self._stream_file(direct, name)
 
@@ -259,6 +265,16 @@ class Handler(BaseHTTPRequestHandler):
     def _ep_config(self, q):
         self._static("config.js", "application/javascript; charset=utf-8")
 
+    def _ep_robots(self, q):
+        self._static("robots.txt", "text/plain; charset=utf-8")
+
+    def _ep_favicon(self, q):
+        self._static("favicon.svg", "image/svg+xml")
+
+    def _ep_health(self, q):
+        """Liveness only. The health check must not do the index route's work."""
+        self._send(200, "ok", "text/plain; charset=utf-8", etag=False)
+
 def _disposition(name):
     """attachment header, ASCII-safe for old clients + RFC 5987 for the rest."""
     ascii_name = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
@@ -283,6 +299,9 @@ ROUTES = {
     "/app.js": Handler._ep_js,
     "/style.css": Handler._ep_css,
     "/config.js": Handler._ep_config,
+    "/robots.txt": Handler._ep_robots,
+    "/favicon.svg": Handler._ep_favicon,
+    "/healthz": Handler._ep_health,
     "/api/latest": Handler._ep_latest,
     "/api/search": Handler._ep_search,
     "/api/genres": Handler._ep_genres,

@@ -32,6 +32,49 @@ function subFor(item){
   return bits.join(" / ");
 }
 
+/* ---------------- watchlist ----------------
+   No accounts and no server state: the list is this browser's localStorage.
+   Storage can be unavailable (private mode, blocked site data), so every
+   access is guarded and a failure just means an empty list. */
+const WATCH_KEY="rink.watch";
+
+function watchMap(){
+  try{return JSON.parse(localStorage.getItem(WATCH_KEY)||"{}")||{};}
+  catch(e){return{};}
+}
+function watchSave(m){
+  try{localStorage.setItem(WATCH_KEY,JSON.stringify(m));}catch(e){}
+}
+function toggleWatch(item){
+  const m=watchMap();
+  if(m[item.id]) delete m[item.id];
+  else m[item.id]={id:item.id,title:item.title,date:item.date||"",poster:item.poster||""};
+  watchSave(m);
+  return !!m[item.id];
+}
+
+function starEl(item){
+  const on=!!watchMap()[item.id];
+  const s=document.createElement("span");
+  s.className="star"+(on?" on":"");
+  s.textContent=on?"★":"☆";   // filled / hollow star
+  s.setAttribute("role","button");
+  s.setAttribute("tabindex","0");
+  s.setAttribute("aria-label",on?"remove from watchlist":"add to watchlist");
+  const flip=e=>{
+    e.preventDefault(); e.stopPropagation();
+    const now=toggleWatch(item);
+    s.className="star"+(now?" on":"");
+    s.textContent=now?"★":"☆";
+    s.setAttribute("aria-label",now?"remove from watchlist":"add to watchlist");
+    // the watchlist view is built from the map, so it has to rebuild itself
+    if((location.hash||"").startsWith("#/watchlist")) route();
+  };
+  s.onclick=flip;
+  s.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){flip(e);}};
+  return s;
+}
+
 function cardEl(item){
   const node=cardTpl.content.firstElementChild.cloneNode(true);
   node.href="#/p/"+item.id;
@@ -54,6 +97,7 @@ function cardEl(item){
   }else{
     img.remove();
   }
+  node.querySelector(".thumb").appendChild(starEl(item));
   return node;
 }
 
@@ -127,6 +171,9 @@ function renderChips(){
     chipsEl.appendChild(chipEl(g.name,browsing.tag===g.slug,
       ()=>{location.hash="#/g/"+encodeURIComponent(g.slug);}));
   });
+  chipsEl.appendChild(chipEl("Watchlist",
+    (location.hash||"").startsWith("#/watchlist"),
+    ()=>{location.hash="#/watchlist";}));
   const fmt=catalog.formats.find(f=>f.slug===browsing.cat);
   chipsEl.appendChild(chipEl(fmt?fmt.name:"Format",!!fmt,openFormatSheet,"chip-end"));
   const on=chipsEl.querySelector(".chip.on");
@@ -372,6 +419,18 @@ async function loadCatalog(){
   renderChips();
 }
 
+/* ---------------- watchlist view ---------------- */
+function watchlist(){
+  beginRender();
+  chipsEl.hidden=false;
+  const items=Object.values(watchMap())
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  view.innerHTML="";
+  view.appendChild(section(`Watchlist (${items.length})`,items,
+    "Nothing saved yet. Tap the star on a card."));
+  renderChips();
+}
+
 function route(){
   const h=location.hash||"#/";
   let m;
@@ -381,7 +440,13 @@ function route(){
     detail(decodeURIComponent(m[1]));
   }else if((m=h.match(/^#\/s\/([^/]+)(?:\/(\d+))?$/))){
     chipsEl.hidden=true;
-    search(decodeURIComponent(m[1]),+(m[2]||1));
+    const q=decodeURIComponent(m[1]);
+    // keep the box in step with the URL, so a shared link shows its query
+    const box=$("#searchInput");
+    if(box.value!==q)box.value=q;
+    search(q,+(m[2]||1));
+  }else if(h==="#/watchlist"||h==="#/watchlist/"){
+    watchlist();
   }else if((m=h.match(/^#\/g\/([^/]+)(?:\/(\d+))?$/))){
     browse(decodeURIComponent(m[1]),+(m[2]||1));
   }else if((m=h.match(/^#\/latest(?:\/(\d+))?$/))){
@@ -399,6 +464,27 @@ $("#searchForm").addEventListener("submit",e=>{
   const q=$("#searchInput").value.trim();
   if(!q)return;
   location.hash="#/s/"+encodeURIComponent(q);
+});
+
+/* Search as you type. 250ms after the last keystroke, so nine letters cost one
+   request, not nine. Once inside a search the entry is replaced rather than
+   pushed, otherwise every pause becomes a back-button step. */
+const searchBox=$("#searchInput");
+let searchTimer=0;
+searchBox.addEventListener("input",()=>{
+  clearTimeout(searchTimer);
+  const q=searchBox.value.trim();
+  searchTimer=setTimeout(()=>{
+    if(!q)return;
+    const h="#/s/"+encodeURIComponent(q);
+    if(location.hash===h)return;
+    if((location.hash||"").startsWith("#/s/")){
+      history.replaceState(null,"",h);
+      route();
+    }else{
+      location.hash=h;
+    }
+  },250);
 });
 /* Paint the list first, fill the chip row when the catalog lands. Awaiting the
    catalog here serialised two round trips in front of the first card: genres
