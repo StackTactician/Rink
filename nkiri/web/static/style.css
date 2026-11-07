@@ -240,6 +240,9 @@ main{
   color:var(--mut);font-weight:700;margin:0 0 10px;
   padding-bottom:8px;border-bottom:2px solid var(--line);
 }
+/* a season block owns its heading: the gap goes above the next heading, not
+   below the previous list, so the heading never reads as a caption */
+.dl-group + .dl-group{margin-top:26px}
 .dl-list{display:flex;flex-direction:column;gap:8px}
 .dl-row{
   display:flex;flex-wrap:wrap;align-items:center;gap:8px;

@@ -421,9 +421,13 @@ async function detail(id){
   const groups=seasonGroups(p.links);
   if(groups){
     groups.forEach(grp=>{
+      // each season is its own block, so the heading reads as a header for
+      // the rows under it rather than a caption for the rows above
+      const g=document.createElement("div");g.className="dl-group";
       const h=document.createElement("div");h.className="dl-head";
       h.textContent="Season "+grp.season;
-      col.appendChild(h);col.appendChild(linkList(grp.links));
+      g.appendChild(h);g.appendChild(linkList(grp.links));
+      col.appendChild(g);
     });
   }else{
     // one file needs no heading; several are episodes or just files
