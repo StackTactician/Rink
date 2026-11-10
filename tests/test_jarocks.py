@@ -94,6 +94,34 @@ class ListedFlagsTest(unittest.TestCase):
         self.assertEqual(self.flags([], {}), {})
 
 
+class SizeParseTest(unittest.TestCase):
+    """The file host prints the size beside the filename, and a plan blurb
+    prints a bigger number further down the same page."""
+
+    def parse(self, page):
+        found = jarocks._SIZE_AFTER_FILE_RE.search(page)
+        if not found:
+            return None
+        return f"{found.group(1)} {found.group(2).upper()}"
+
+    def test_size_after_the_file_extension(self):
+        page = ("Name.That.Tune.S06E02.540p.X265.AAC.[9jaRocks.Com].mkv"
+                " 200.55 MB <a href='x'>Download</a>")
+        self.assertEqual(self.parse(page), "200.55 MB")
+
+    def test_a_plan_limit_is_not_a_file_size(self):
+        page = ("Upload files up to 3.79 GB in size."
+                "<div>Some.Series.S01E01.540p.mkv 195.45 MB</div>")
+        self.assertEqual(self.parse(page), "195.45 MB")
+
+    def test_no_size_on_the_page(self):
+        self.assertIsNone(self.parse("<html>nothing to see</html>"))
+
+    def test_parse_size_agrees(self):
+        from nkiri.text import parse_size
+        self.assertEqual(parse_size("200.55 MB"), 210291916)
+
+
 class CardParseTest(unittest.TestCase):
     PAGE = (
         '<li class="post-item is-trending">'
@@ -113,6 +141,22 @@ class CardParseTest(unittest.TestCase):
         self.assertEqual([c["id"] for c in cards], [375773, 375700])
         for card in cards:
             self.assertEqual(set(card), {"id", "title", "url", "date", "poster"})
+
+    def test_listing_thumbnail_is_replaced_by_the_original(self):
+        """A -390x220 on a category page is a crop of the real poster: the
+        bottom third, usually the title, is gone."""
+        url = ("https://9jarocks.net/wp-content/uploads/2026/02/"
+               "Falling_Poster-390x220.jpg")
+        self.assertEqual(
+            jarocks._full_poster(url),
+            "https://9jarocks.net/wp-content/uploads/2026/02/Falling_Poster.jpg")
+
+    def test_a_suffix_that_is_not_a_size_is_left_alone(self):
+        for url in ("https://9jarocks.net/wp-content/uploads/2026/02/"
+                    "sodRW36uEDHjv8l1WhYUNDvnIK6.jpg",
+                    "https://9jarocks.net/wp-content/uploads/2026/02/Poster.webp",
+                    ""):
+            self.assertEqual(jarocks._full_poster(url), url)
 
     def test_rating_widget_numbers_are_stripped(self):
         page = ('<li class="post-item"><a aria-label="Mercy (2026) 4.6 (9)" '

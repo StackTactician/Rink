@@ -183,6 +183,11 @@ main{
 .card:active{border-color:var(--acc)}
 .thumb{position:relative;aspect-ratio:2/3;background:#111;overflow:hidden}
 .thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+/* A first guess only, for the moment before the picture arrives: 9jarocks
+   serves 390x220 stills on a category page but portrait posters on newest
+   uploads, so the card rewrites this ratio from the image once it loads
+   (app.js) and cover then has nothing to cut. */
+.card.src-9ja .thumb{aspect-ratio:16/9}
 .thumb img:not(.on){opacity:0}
 .thumb .ph,.poster .ph{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -231,6 +236,12 @@ main{
   background:#111;border:2px solid var(--line);overflow:hidden;position:relative;
 }
 .poster img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+/* thenkiri's detail poster is 700 tall at 600, 785 or 1000 wide, so no single
+   ratio is right: contain shows the whole poster, and the panel colour fills
+   whatever the crop used to hide. Both sources take contain here — a detail
+   page is one big picture, so losing its edges is never the right trade. */
+.poster.src-nkiri{aspect-ratio:10/7}
+.poster img{object-fit:contain}
 .poster img:not(.on){opacity:0}
 .d-title{
   font-size:clamp(21px,6vw,28px);font-weight:900;line-height:1.12;

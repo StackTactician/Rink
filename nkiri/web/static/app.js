@@ -19,8 +19,9 @@ const sourcesEl = $("#sources");
    between the two sites. */
 const SOURCES = [{id: "nkiri", label: "Nkiri"}, {id: "9ja", label: "9jarocks"}];
 const DEFAULT_SOURCE = "nkiri";
-/* only thenkiri prints a per-file size on a page that can be read cheaply */
-const CAN_SIZE = {nkiri: true, "9ja": false};
+/* both sites can answer, but 9jarocks answers per file (one GET per episode
+   row), so it is the slower of the two on a long season */
+const CAN_SIZE = {nkiri: true, "9ja": true};
 const SOURCE_KEY = "rink.src";
 let source = DEFAULT_SOURCE;
 
@@ -158,14 +159,26 @@ function cardEl(item){
   // right one even from the watchlist, where both sites are mixed
   const src=item.src||source;
   node.href="#/"+src+"/p/"+item.id;
+  // the source only picks the ratio the box wears before its picture lands
+  node.classList.add("src-"+src);
   node.querySelector(".title").textContent=item.title;
   node.querySelector(".sub").textContent=subFor(item);
   const img=node.querySelector("img");
   const ph=node.querySelector(".ph");
+  const thumb=node.querySelector(".thumb");
   if(item.poster){
     img.loading="lazy"; img.decoding="async"; img.alt=item.title;
     // handlers first: a cached poster can fire load before src is assigned
-    img.onload=()=>{img.classList.add("on");ph.style.display="none";};
+    img.onload=()=>{
+      img.classList.add("on");ph.style.display="none";
+      /* the box takes the picture's own shape. The ratio cannot be fixed per
+         site: 9jarocks serves 390x220 stills when browsing a category and
+         portrait posters on newest-uploads, so any one ratio crops the other
+         case. Matching the image means cover has nothing left to cut. */
+      if(img.naturalWidth&&img.naturalHeight){
+        thumb.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;
+      }
+    };
     img.onerror=()=>{
       // one retry, then fall back to the placeholder
       if(!img.dataset.retried){img.dataset.retried="1";
@@ -177,7 +190,7 @@ function cardEl(item){
   }else{
     img.remove();
   }
-  node.querySelector(".thumb").appendChild(starEl({...item, src}));
+  thumb.appendChild(starEl({...item, src}));
   return node;
 }
 
@@ -446,7 +459,11 @@ async function detail(id){
 
   const d=document.createElement("div");d.className="detail";
   // poster
-  const poster=document.createElement("div");poster.className="poster";
+  /* the source rides along as a class: thenkiri's detail posters are 700 tall
+     at anything from 600 to 1000 wide, 9jarocks' are a steady 2:3, so one
+     fixed box for both would crop one of them */
+  const poster=document.createElement("div");
+  poster.className="poster src-"+source;
   const ph=document.createElement("span");ph.className="ph";ph.textContent="rink";
   poster.appendChild(ph);
   if(p.poster){
@@ -585,7 +602,11 @@ async function detail(id){
         const el=sizeEls.get(lk.url);
         if(!el)continue;
         try{
-          const r=await fetch(apiUrl("/api/size?url="+encodeURIComponent(lk.url)));
+          /* the source has to travel with this one: the endpoint reads the
+             size differently per site, and without ?src it answers for the
+             default (thenkiri), which knows nothing about a 9jarocks file */
+          const r=await fetch(apiUrl("/api/size?src="+encodeURIComponent(source)
+                                     +"&url="+encodeURIComponent(lk.url)));
           const j=await r.json();
           if(stale(token))return;
           if(j.size)el.textContent=j.size;

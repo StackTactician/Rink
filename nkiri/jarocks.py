@@ -42,6 +42,7 @@ _latest_cache = TTLCache(ttl=120)
 _search_cache = TTLCache(ttl=300)
 _post_cache = TTLCache(ttl=600)
 _browse_cache = TTLCache(ttl=120)
+_size_cache = TTLCache(ttl=3600)
 
 #: Rink shows films and shows. This site also files music, gist, news, sport
 #: highlights and "Whatsapp Stories" in the same table, so the filter is an
@@ -120,6 +121,15 @@ _CARD_SPLIT_RE = re.compile(r'<li[^>]*class="[^"]*\bpost-item\b', re.I)
 _POST_HREF_RE = re.compile(
     r'href="(https://9jarocks\.net/videodownload/[^"]*?-id(\d+)\.html)"', re.I)
 _ARIA_RE = re.compile(r'aria-label="([^"]*)"')
+#: WordPress lists a resized copy beside the real file: a poster that is
+#: 666x1000 becomes -390x220 on the way out, and that is a center crop, so the
+#: bottom of the artwork (usually the title) is cut off
+_WP_THUMB_SUFFIX_RE = re.compile(r"-\d+x\d+(?=\.[A-Za-z]{2,4}$)")
+
+
+def _full_poster(url):
+    """The uncropped original behind a resized listing thumbnail."""
+    return _WP_THUMB_SUFFIX_RE.sub("", url or "")
 _THUMB_RE = re.compile(
     r'(?:data-src|src)="(https://9jarocks\.net/wp-content/uploads/[^"]+)"', re.I)
 
@@ -148,7 +158,8 @@ def _cards(page):
                 htmllib.unescape(title.group(1)) if title else "")),
             "url": href.group(1),
             "date": "",
-            "poster": htmllib.unescape(poster.group(1)) if poster else "",
+            "poster": _full_poster(
+                htmllib.unescape(poster.group(1))) if poster else "",
         })
     return out
 
@@ -217,7 +228,8 @@ def _feed_page(page):
                 title.group(1))) if title else ""),
             "url": href,
             "date": _rfc822(date.group(1)) if date else "",
-            "poster": htmllib.unescape(poster.group(1)) if poster else "",
+            "poster": _full_poster(
+                htmllib.unescape(poster.group(1))) if poster else "",
         })
     # a feed page is always the same size, so a full one means there is a next
     return _dedupe(items), len(items) >= 20
@@ -651,10 +663,32 @@ def resolve_info(link_url):
     return {"direct": direct, "name": name, "size": size}
 
 
+#: the host prints "<filename>.mkv 200.55 MB" beside its download button, and
+#: the same page also advertises "upload files up to 3.79 GB", so the match is
+#: anchored to the file extension rather than to the number alone
+_SIZE_AFTER_FILE_RE = re.compile(
+    r"\.(?:mkv|mp4|avi|mov|m4v|webm|mp3|zip|rar)\s+([0-9.]+)\s*([KMGT]i?B)", re.I)
+
+
 def size_info(url):
-    """Per-link size. This site prints it on the post page instead, so the
-    detail view already carries it and there is nothing to look up here."""
-    return {"size": None, "bytes": None}
+    """Per-link size from the file host's own page: one GET, cached.
+
+    The post page prints a size for a single file, so every episode row of a
+    season goes unanswered there; this asks the host each row points at.
+    """
+    def fetch():
+        try:
+            raw, _ = _get(url)
+        except NkiriError as e:
+            logger.warning("9ja size lookup failed %s: %s", url, e)
+            return {"size": None, "bytes": None}
+        m = _SIZE_AFTER_FILE_RE.search(strip_tags(raw))
+        if not m:
+            return {"size": None, "bytes": None}
+        text = f"{m.group(1)} {m.group(2).upper()}"
+        return {"size": text, "bytes": parse_size(text)}
+
+    return _size_cache.get_or_set(url, fetch)
 
 
 # ----------------------------------------------------------------- allowlist
@@ -676,5 +710,5 @@ def resolve_host_allowed(url):
 
 def clear_cache():
     for c in (_menu_cache, _latest_cache, _search_cache,
-              _post_cache, _browse_cache):
+              _post_cache, _browse_cache, _size_cache):
         c.clear()
