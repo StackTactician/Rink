@@ -47,7 +47,7 @@ button{font:inherit;color:inherit}
 /* ---------- top bar ---------- */
 .top{
   position:sticky;top:0;z-index:20;
-  display:flex;align-items:center;gap:8px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   padding:8px max(var(--pad),env(safe-area-inset-left))
           8px max(var(--pad),env(safe-area-inset-right));
   background:var(--bg);
@@ -60,7 +60,26 @@ button{font:inherit;color:inherit}
   padding:4px 2px;
 }
 .brand::after{content:".";color:var(--acc)}
-.search{flex:1;display:flex;min-width:0;border:2px solid var(--line)}
+/* source toggle: two sites, one page. A segmented control, not a menu, so
+   the current choice is always visible and one tap away from the other. */
+.sources{
+  flex:0 0 auto;display:flex;margin-left:auto;
+  border:2px solid var(--line);
+}
+.sources button{
+  background:transparent;color:var(--mut);border:0;
+  padding:0 10px;min-height:34px;cursor:pointer;
+  font-size:10.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;
+}
+.sources button + button{border-left:2px solid var(--line)}
+.sources button.on{background:var(--acc);color:var(--acc-ink)}
+.sources button:active{filter:brightness(.85)}
+/* the phone gets two rows (brand + toggle, then search); wide screens keep
+   the original single row */
+.search{flex:1 1 100%;order:3;display:flex;min-width:0;border:2px solid var(--line)}
+@media(min-width:560px){
+  .search{flex:1 1 auto;order:0}
+}
 .search input{
   flex:1;min-width:0;width:100%;
   background:var(--bg);border:0;outline:0;color:var(--txt);
@@ -242,7 +261,24 @@ main{
 }
 /* a season block owns its heading: the gap goes above the next heading, not
    below the previous list, so the heading never reads as a caption */
-.dl-group + .dl-group{margin-top:26px}
+.dl-group + .dl-group{margin-top:44px}
+/* the season heading is a toggle, so it must look like the old caption but
+   behave like a button */
+button.dl-head{
+  border:0;border-bottom:2px solid var(--line);background:transparent;
+  width:100%;display:flex;align-items:center;gap:8px;cursor:pointer;
+  text-align:left;font-family:inherit;min-height:40px;padding:0 0 8px;
+}
+button.dl-head:active{filter:brightness(1.5)}
+.dl-caret{
+  display:inline-block;font-size:10px;line-height:1;
+  transition:transform .15s ease;
+}
+.dl-group:not(.is-open) .dl-caret{transform:rotate(-90deg)}
+.dl-count{
+  margin-left:auto;font-size:10px;font-weight:400;letter-spacing:.06em;
+  text-transform:none;opacity:.7;white-space:nowrap;
+}
 .dl-list{display:flex;flex-direction:column;gap:8px}
 .dl-row{
   display:flex;flex-wrap:wrap;align-items:center;gap:8px;

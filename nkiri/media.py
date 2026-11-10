@@ -111,7 +111,8 @@ def clear_cache():
 # same-origin and lets us cache decoded posters in front of the phone.
 
 #: hosts whose images we will fetch on the browser's behalf
-IMAGE_HOSTS = frozenset({"thenkiri.com", "www.thenkiri.com"})
+IMAGE_HOSTS = frozenset({"thenkiri.com", "www.thenkiri.com",
+                         "9jarocks.net", "www.9jarocks.net"})
 
 _MAX_IMAGE_BYTES = 40 * 1024 * 1024
 _images = OrderedDict()       # url -> (bytes, ctype), LRU

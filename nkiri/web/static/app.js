@@ -10,9 +10,81 @@ const apiUrl = p => p.startsWith("/api/") ? API_BASE + p : p;
 const view = $("#view");
 const cardTpl = $("#cardTpl");
 const chipsEl = $("#chips");
+const sourcesEl = $("#sources");
 
-/* browse state: genre slug + format slug, and the list the server sends */
-let catalog = {genres: [], formats: []};
+/* ---------------- sources ----------------
+   Two sites behind one UI. The choice lives in the URL ("#/9ja/s/avatar") so
+   a shared link keeps it, and in localStorage so the next visit opens on the
+   one that was picked. Every API call carries ?src= because post ids collide
+   between the two sites. */
+const SOURCES = [{id: "nkiri", label: "Nkiri"}, {id: "9ja", label: "9jarocks"}];
+const DEFAULT_SOURCE = "nkiri";
+/* only thenkiri prints a per-file size on a page that can be read cheaply */
+const CAN_SIZE = {nkiri: true, "9ja": false};
+const SOURCE_KEY = "rink.src";
+let source = DEFAULT_SOURCE;
+
+function storedSource(){
+  try{
+    const s = localStorage.getItem(SOURCE_KEY);
+    return SOURCES.some(x => x.id === s) ? s : DEFAULT_SOURCE;
+  }catch(e){ return DEFAULT_SOURCE; }
+}
+function sourceLabel(id){
+  const s = SOURCES.find(x => x.id === id);
+  return s ? s.label : "";
+}
+/* "#/9ja/s/avatar" -> {src:"9ja", rest:"/s/avatar"}; a bare "#/p/1" keeps the
+   remembered source, so every link written before this toggle still works */
+function hashRoute(){
+  const h = location.hash || "#/";
+  const m = h.match(/^#\/([a-z0-9]+)(?=\/|$)(.*)$/);
+  if(m && SOURCES.some(x => x.id === m[1])) return {src: m[1], rest: m[2] || "/"};
+  return {src: storedSource(), rest: h.slice(1) || "/"};
+}
+/* links always name the source, so what the toggle shows is what is loaded */
+function href(rest){ return "#/" + source + rest; }
+
+function setSource(id){
+  const next = SOURCES.some(x => x.id === id) ? id : DEFAULT_SOURCE;
+  if(next === source) return false;
+  source = next;
+  try{ localStorage.setItem(SOURCE_KEY, source); }catch(e){}
+  paintSource();
+  loadMenu();           // each site brings its own menu, not a sliced one
+  return true;
+}
+function paintSource(){
+  sourcesEl.querySelectorAll("button").forEach(b => {
+    const on = b.dataset.src === source;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+/* switching re-runs whatever is on screen against the other site: same view,
+   same search, same page, different source */
+function switchSource(id){
+  if(id === source) return;
+  let rest = hashRoute().rest;
+  if(/^\/p\//.test(rest)){
+    // post ids are per-site: the same number is a different title on the
+    // other one, so carry the name across and search it there instead
+    const el = $(".d-title");
+    const title = el ? el.textContent.trim() : "";
+    rest = title ? "/s/" + encodeURIComponent(title) : "/";
+  }
+  setSource(id);
+  const h = "#/" + source + rest;
+  if(location.hash === h) route();
+  else location.hash = h;
+}
+sourcesEl.addEventListener("click", e => {
+  const b = e.target.closest("button[data-src]");
+  if(b) switchSource(b.dataset.src);
+});
+
+/* browse state: the slug of the selected chip, and the format filter */
+let catalog = {chips: [], formats: [], kind: "genre"};
 const browsing = {tag: "", cat: ""};
 
 function esc(s){return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
@@ -45,16 +117,21 @@ function watchMap(){
 function watchSave(m){
   try{localStorage.setItem(WATCH_KEY,JSON.stringify(m));}catch(e){}
 }
+/* ids collide between the two sites, so a saved item is keyed by source+id */
+function watchKey(item){ return (item.src||source)+":"+item.id; }
+
 function toggleWatch(item){
   const m=watchMap();
-  if(m[item.id]) delete m[item.id];
-  else m[item.id]={id:item.id,title:item.title,date:item.date||"",poster:item.poster||""};
+  const key=watchKey(item);
+  if(m[key]) delete m[key];
+  else m[key]={id:item.id,src:item.src||source,title:item.title,
+               date:item.date||"",poster:item.poster||""};
   watchSave(m);
-  return !!m[item.id];
+  return !!m[key];
 }
 
 function starEl(item){
-  const on=!!watchMap()[item.id];
+  const on=!!watchMap()[watchKey(item)];
   const s=document.createElement("span");
   s.className="star"+(on?" on":"");
   s.textContent=on?"★":"☆";   // filled / hollow star
@@ -68,7 +145,7 @@ function starEl(item){
     s.textContent=now?"★":"☆";
     s.setAttribute("aria-label",now?"remove from watchlist":"add to watchlist");
     // the watchlist view is built from the map, so it has to rebuild itself
-    if((location.hash||"").startsWith("#/watchlist")) route();
+    if(hashRoute().rest.startsWith("/watchlist")) route();
   };
   s.onclick=flip;
   s.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){flip(e);}};
@@ -77,7 +154,10 @@ function starEl(item){
 
 function cardEl(item){
   const node=cardTpl.content.firstElementChild.cloneNode(true);
-  node.href="#/p/"+item.id;
+  // a card remembers which site it came from, so the detail view opens the
+  // right one even from the watchlist, where both sites are mixed
+  const src=item.src||source;
+  node.href="#/"+src+"/p/"+item.id;
   node.querySelector(".title").textContent=item.title;
   node.querySelector(".sub").textContent=subFor(item);
   const img=node.querySelector("img");
@@ -97,7 +177,7 @@ function cardEl(item){
   }else{
     img.remove();
   }
-  node.querySelector(".thumb").appendChild(starEl(item));
+  node.querySelector(".thumb").appendChild(starEl({...item, src}));
   return node;
 }
 
@@ -164,20 +244,23 @@ function chipEl(label,on,onclick,extra){
 }
 
 function renderChips(){
-  if(!catalog.genres.length)return;      // the row keeps its height meanwhile
+  if(!catalog.chips.length)return;      // the row keeps its height meanwhile
   chipsEl.replaceChildren();
-  chipsEl.appendChild(chipEl("All",!browsing.tag,()=>{location.hash="#/latest";}));
+  chipsEl.appendChild(chipEl("All",!browsing.tag,()=>{location.hash=href("/");}));
   // second slot, not last: the row scrolls, and 22 genre chips before it
   // would leave the watchlist permanently off-screen
   chipsEl.appendChild(chipEl("Watchlist",
-    (location.hash||"").startsWith("#/watchlist"),
-    ()=>{location.hash="#/watchlist";}));
-  catalog.genres.forEach(g=>{
+    (location.hash||"").includes("/watchlist"),
+    ()=>{location.hash=href("/watchlist");}));
+  catalog.chips.forEach(g=>{
     chipsEl.appendChild(chipEl(g.name,browsing.tag===g.slug,
-      ()=>{location.hash="#/g/"+encodeURIComponent(g.slug);}));
+      ()=>{location.hash=href("/c/"+encodeURIComponent(g.slug));}));
   });
-  const fmt=catalog.formats.find(f=>f.slug===browsing.cat);
-  chipsEl.appendChild(chipEl(fmt?fmt.name:"Format",!!fmt,openFormatSheet,"chip-end"));
+  // the format filter is thenkiri-only: 9jarocks has one axis and no formats
+  if(catalog.formats.length){
+    const fmt=catalog.formats.find(f=>f.slug===browsing.cat);
+    chipsEl.appendChild(chipEl(fmt?fmt.name:"Format",!!fmt,openFormatSheet,"chip-end"));
+  }
   const on=chipsEl.querySelector(".chip.on");
   if(on)on.scrollIntoView({inline:"center",block:"nearest"});
 }
@@ -209,20 +292,21 @@ function openFormatSheet(){
 function closeSheet(){const s=$("#sheet");if(s)s.remove();}
 
 function reloadBrowse(){
-  const h=location.hash||"#/";
-  const m=h.match(/^#\/g\/([^/]+)(?:\/(\d+))?$/);
+  const {rest}=hashRoute();
+  const m=rest.match(/^\/[cg]\/([^/]+)/);
   if(m)browse(decodeURIComponent(m[1]),1);
-  else if(/^#\/(latest)?(\/?$|\/\d+$)/.test(h)||h==="#/")browse("",1);
+  else browse("",1);
 }
 
-/* ---------------- home / genre browse ---------------- */
+/* ---------------- home / category browse ---------------- */
 function browseTitle(){
-  const g=catalog.genres.find(x=>x.slug===browsing.tag);
+  const g=catalog.chips.find(x=>x.slug===browsing.tag);
   const f=catalog.formats.find(x=>x.slug===browsing.cat);
   if(g&&f)return`${g.name} / ${f.name}`;
   if(g)return g.name;
   if(f)return`New in ${f.name}`;
-  return"New uploads";
+  // the two sites do not call their front page the same thing
+  return source===DEFAULT_SOURCE?"New uploads":"Latest videos";
 }
 
 async function home(page=1){
@@ -237,13 +321,14 @@ async function browse(tag,page=1){
   view.innerHTML="";
   view.appendChild(spinner());
   try{
-    const res=await getJSON("/api/browse?tag="+encodeURIComponent(browsing.tag)
+    const res=await getJSON("/api/browse?src="+encodeURIComponent(source)
+                           +"&tag="+encodeURIComponent(browsing.tag)
                            +"&cat="+encodeURIComponent(browsing.cat)
                            +"&limit=30&page="+page);
     if(stale(t))return;
     view.innerHTML="";
     view.appendChild(section(browseTitle(),res.items,"Nothing here yet."));
-    const base=browsing.tag?"#/g/"+encodeURIComponent(browsing.tag):"#/latest";
+    const base=browsing.tag?href("/c/"+encodeURIComponent(browsing.tag)):href("/latest");
     const p=pager(res,base);
     if(p)view.appendChild(p);
   }catch(e){
@@ -258,7 +343,8 @@ async function search(q,page=1){
   const t=beginRender();
   view.innerHTML=""; view.appendChild(spinner("Searching..."));
   try{
-    const res=await getJSON("/api/search?q="+encodeURIComponent(q)
+    const res=await getJSON("/api/search?src="+encodeURIComponent(source)
+                           +"&q="+encodeURIComponent(q)
                            +"&limit=30&page="+page);
     if(stale(t))return;
     view.innerHTML="";
@@ -269,15 +355,26 @@ async function search(q,page=1){
         ?`Results for "${q}" (${res.items.length})`
         :`Results for "${q}"`;
       view.appendChild(section(head,res.items));
-      const p=pager(res,"#/s/"+encodeURIComponent(q));
+      const p=pager(res,href("/s/"+encodeURIComponent(q)));
       if(p)view.appendChild(p);
     }else{
       const e=document.createElement("div");e.className="state";
-      e.textContent=page>1?`No more results for "${q}".`:`No results for "${q}".`;
+      e.textContent=page>1?`No more results for "${q}" on ${sourceLabel(source)}.`
+                           :`No results for "${q}" on ${sourceLabel(source)}.`;
       view.appendChild(e);
       const back=document.createElement("a");back.className="back";back.textContent="back to page 1";
-      back.href="#/s/"+encodeURIComponent(q);
+      back.href=href("/s/"+encodeURIComponent(q));
       if(page>1)view.appendChild(back);
+      // the other site may well have it: offer the switch instead of a dead end
+      const other=SOURCES.find(s=>s.id!==source);
+      if(other&&page===1){
+        const b=document.createElement("button");
+        b.type="button";b.className="btn btn-ghost";b.id="otherSource";
+        b.textContent="Search "+other.label+" instead";
+        b.onclick=()=>{setSource(other.id);
+          location.hash="#/"+other.id+"/s/"+encodeURIComponent(q);};
+        view.appendChild(b);
+      }
     }
   }catch(e){
     if(stale(t))return;
@@ -306,7 +403,7 @@ function yearOf(title){
 function qualityOf(lk){
   let u="";
   try{u=decodeURIComponent((lk&&lk.url)||"");}catch(e){u=(lk&&lk.url)||"";}
-  const m=u.match(/\b(2160p|1440p|1080p|720p|480p|360p|4K|WEB[-_]?Rip|WEB[-_]?DL|BluRay|BRRip|HDRip|HDTV|DVDRip)\b/i);
+  const m=u.match(/\b(2160p|1440p|1080p|720p|576p|540p|480p|360p|240p|4K|WEB[-_]?Rip|WEB[-_]?DL|BluRay|BRRip|HDRip|HDTV|DVDRip)\b/i);
   return m?m[1]:"";
 }
 
@@ -335,7 +432,8 @@ async function detail(id){
   const t=beginRender();
   view.innerHTML=""; view.appendChild(spinner("Loading..."));
   let p;
-  try{p=await getJSON("/api/post?id="+encodeURIComponent(id));}
+  try{p=await getJSON("/api/post?src="+encodeURIComponent(source)
+                     +"&id="+encodeURIComponent(id));}
   catch(e){if(stale(t))return;
     view.innerHTML="";const d=document.createElement("div");d.className="state";
     d.textContent="Couldn't load: "+e.message;view.appendChild(d);return;}
@@ -384,7 +482,7 @@ async function detail(id){
     const gc=document.createElement("div");gc.className="d-genres";
     p.genres.forEach(g=>{
       const a=document.createElement("a");a.className="chip";a.textContent=g.name;
-      a.href="#/g/"+encodeURIComponent(g.slug);
+      a.href=href("/c/"+encodeURIComponent(g.slug));
       gc.appendChild(a);
     });
     col.appendChild(gc);
@@ -411,7 +509,9 @@ async function detail(id){
       const lab=document.createElement("span");lab.className="dl-lbl";lab.textContent="Download";
       const sz=document.createElement("span");sz.className="dl-size";
       btn.appendChild(lab);btn.appendChild(sz);
-      sizeEls.set(lk.url,sz);
+      // a size the post page already printed costs no request
+      if(lk.size)sz.textContent=lk.size;
+      else sizeEls.set(lk.url,sz);
       btn.onclick=()=>startDl(lk,btn,lab,status);
       row.appendChild(info);row.appendChild(btn);list.appendChild(row);
     });
@@ -420,13 +520,35 @@ async function detail(id){
 
   const groups=seasonGroups(p.links);
   if(groups){
-    groups.forEach(grp=>{
+    groups.forEach((grp,i)=>{
       // each season is its own block, so the heading reads as a header for
       // the rows under it rather than a caption for the rows above
       const g=document.createElement("div");g.className="dl-group";
-      const h=document.createElement("div");h.className="dl-head";
-      h.textContent="Season "+grp.season;
-      g.appendChild(h);g.appendChild(linkList(grp.links));
+      const h=document.createElement("button");
+      h.type="button";h.className="dl-head";
+      const caret=document.createElement("span");
+      caret.className="dl-caret";caret.textContent="▾";
+      const name=document.createElement("span");
+      name.textContent="Season "+grp.season;
+      const count=document.createElement("span");
+      count.className="dl-count";
+      count.textContent=grp.links.length+(grp.links.length===1?" episode":" episodes");
+      h.appendChild(caret);h.appendChild(name);h.appendChild(count);
+      const body=document.createElement("div");body.className="dl-body";
+      body.appendChild(linkList(grp.links));
+      // first season open, the rest folded: a six-season page should not
+      // open as a wall of rows
+      const open=i===0;
+      g.classList.toggle("is-open",open);
+      h.setAttribute("aria-expanded",open?"true":"false");
+      body.hidden=!open;
+      h.onclick=()=>{
+        const now=!g.classList.contains("is-open");
+        g.classList.toggle("is-open",now);
+        h.setAttribute("aria-expanded",now?"true":"false");
+        body.hidden=!now;
+      };
+      g.appendChild(h);g.appendChild(body);
       col.appendChild(g);
     });
   }else{
@@ -449,6 +571,11 @@ async function detail(id){
   fillSizes(t,p.links);
 
   async function fillSizes(token,links){
+    // only thenkiri prints a size on a page that is cheap to read; for the
+    // other source this would be one wasted round trip per episode
+    if(!CAN_SIZE[source])return;
+    links=links.filter(lk=>!lk.size);
+    if(!links.length)return;
     const LIMIT=3;
     let i=0;
     async function worker(){
@@ -514,13 +641,18 @@ function handToBrowser(url,name){
 }
 
 /* ---------------- router ---------------- */
-async function loadCatalog(){
+/* One request, because the menu is per source: thenkiri sends genres plus
+   formats, 9jarocks sends its categories and no formats. */
+async function loadMenu(){
+  const wanted=source;
   try{
-    const [g,f]=await Promise.all([getJSON("/api/genres"),getJSON("/api/formats")]);
-    catalog={genres:g.genres||[],formats:f.formats||[]};
+    const m=await getJSON("/api/menu?src="+encodeURIComponent(wanted));
+    if(wanted!==source)return;    // the toggle moved while this was in flight
+    catalog={chips:m.chips||[],formats:m.formats||[],kind:m.kind||"genre"};
   }catch(e){
-    catalog={genres:[],formats:[]};
-    chipsEl.hidden=true;          // no catalog: hide the empty row entirely
+    if(wanted!==source)return;
+    catalog={chips:[],formats:[],kind:"genre"};
+    chipsEl.hidden=true;          // no menu: hide the empty row entirely
   }
   renderChips();
 }
@@ -538,24 +670,28 @@ function watchlist(){
 }
 
 function route(){
-  const h=location.hash||"#/";
+  const {src,rest}=hashRoute();
+  // the URL is the source of truth: a link with a prefix wins over the one
+  // that was remembered, and switching here reloads the menu if it changed
+  setSource(src);
   let m;
   closeSheet();
-  if((m=h.match(/^#\/p\/(.+)$/))){
+  if((m=rest.match(/^\/p\/(.+)$/))){
     chipsEl.hidden=true;
     detail(decodeURIComponent(m[1]));
-  }else if((m=h.match(/^#\/s\/([^/]+)(?:\/(\d+))?$/))){
+  }else if((m=rest.match(/^\/s\/([^/]+)(?:\/(\d+))?$/))){
     chipsEl.hidden=true;
     const q=decodeURIComponent(m[1]);
     // keep the box in step with the URL, so a shared link shows its query
     const box=$("#searchInput");
     if(box.value!==q)box.value=q;
     search(q,+(m[2]||1));
-  }else if(h==="#/watchlist"||h==="#/watchlist/"){
+  }else if(/^\/watchlist\/?$/.test(rest)){
     watchlist();
-  }else if((m=h.match(/^#\/g\/([^/]+)(?:\/(\d+))?$/))){
+  }else if((m=rest.match(/^\/[cg]\/([^/]+)(?:\/(\d+))?$/))){
+    // /g/ is the old genre route, /c/ the current one; both mean "chip"
     browse(decodeURIComponent(m[1]),+(m[2]||1));
-  }else if((m=h.match(/^#\/latest(?:\/(\d+))?$/))){
+  }else if((m=rest.match(/^\/latest(?:\/(\d+))?$/))){
     home(+(m[1]||1));
   }else{
     home(1);
@@ -569,7 +705,7 @@ $("#searchForm").addEventListener("submit",e=>{
   e.preventDefault();
   const q=$("#searchInput").value.trim();
   if(!q)return;
-  location.hash="#/s/"+encodeURIComponent(q);
+  location.hash=href("/s/"+encodeURIComponent(q));
 });
 
 /* Search as you type. 250ms after the last keystroke, so nine letters cost one
@@ -582,9 +718,11 @@ searchBox.addEventListener("input",()=>{
   const q=searchBox.value.trim();
   searchTimer=setTimeout(()=>{
     if(!q)return;
-    const h="#/s/"+encodeURIComponent(q);
+    const h=href("/s/"+encodeURIComponent(q));
     if(location.hash===h)return;
-    if((location.hash||"").startsWith("#/s/")){
+    // inside a search for this source the entry is replaced; coming from
+    // anywhere else it is pushed, so back returns to where the user was
+    if(hashRoute().rest.startsWith("/s/")){
       history.replaceState(null,"",h);
       route();
     }else{
@@ -592,9 +730,9 @@ searchBox.addEventListener("input",()=>{
     }
   },250);
 });
-/* Paint the list first, fill the chip row when the catalog lands. Awaiting the
-   catalog here serialised two round trips in front of the first card: genres
-   and formats (~1.2s) had to finish before /api/browse was even requested.
+/* Paint the list first, fill the chip row when the menu lands. Awaiting the
+   menu here serialised two round trips in front of the first card.
    renderChips() is a no-op on an empty catalog and runs again on arrival. */
+paintSource();
 route();
-loadCatalog();
+loadMenu();

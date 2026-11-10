@@ -13,15 +13,10 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from ..catalog import browse, format_names, formats, genre_names, genres, public
-from ..config import BASE
-from ..content import parse_post_view
-from ..download import (direct_url_allowed, landing_size, resolve_info,
-                        resolve_target_allowed)
-from ..media import fetch_image, image_allowed, proxy_url
+from .. import sources
+from ..media import fetch_image, image_allowed
 from ..net import open_stream
-from ..posts import get_post, latest, page_payload, search_results
-from ..refs import parse_ref
+from ..posts import page_payload
 from ..text import human_size
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -191,8 +186,17 @@ class Handler(BaseHTTPRequestHandler):
 
     # ----------------------------------------------------------- endpoints
 
+    def _ep_sources(self, q):
+        """The toggle: which sites exist, and which one is the default."""
+        self._json({"sources": sources.source_list(), "default": sources.DEFAULT})
+
+    def _ep_menu(self, q):
+        """Chip row for one source. Each site keeps its own taxonomy."""
+        self._json(sources.menu(_src(q)))
+
     def _ep_latest(self, q):
-        self._json(latest(_int_param(q, "limit", 24), _int_param(q, "page", 1)))
+        self._json(sources.latest(_src(q), _int_param(q, "limit", 24),
+                                  _int_param(q, "page", 1)))
 
     def _ep_search(self, q):
         query = _str_param(q, "q")
@@ -200,53 +204,54 @@ class Handler(BaseHTTPRequestHandler):
         page = _int_param(q, "page", 1)
         if not query.strip():
             return self._json(page_payload([], page, limit, 0, 0))
-        self._json(search_results(query, limit, page))
+        self._json(sources.search(_src(q), query, limit, page))
 
     def _ep_genres(self, q):
-        self._json({"genres": public(genres())})
+        # nkiri-only shape, kept for old clients; /api/menu is the real one
+        self._json({"genres": sources.menu(sources.NKIRI)["chips"]})
 
     def _ep_formats(self, q):
-        self._json({"formats": public(formats())})
+        self._json({"formats": sources.menu(sources.NKIRI)["formats"]})
 
     def _ep_browse(self, q):
-        self._json(browse(_str_param(q, "tag"), _str_param(q, "cat"),
-                          _int_param(q, "limit", 24), _int_param(q, "page", 1)))
+        self._json(sources.browse(_src(q), _str_param(q, "tag"),
+                                  _str_param(q, "cat"),
+                                  _int_param(q, "limit", 24),
+                                  _int_param(q, "page", 1)))
 
     def _ep_post(self, q):
-        pid = parse_ref(_str_param(q, "id"))
+        src = _src(q)
+        pid = sources.parse_ref(src, _str_param(q, "id"))
         if not pid:
             return self._json({"error": "not found"}, 404)
-        post = parse_post_view(get_post(pid))
-        post["poster"] = proxy_url(post.get("poster"))
-        post["genres"] = genre_names(post.pop("tag_ids", []))
-        post["formats"] = format_names(post.pop("cat_ids", []))
-        return self._json(post)
+        return self._json(sources.post(src, pid))
 
     def _ep_size(self, q):
-        """File size for one download link, read off its landing page."""
+        """File size for one download link, when the source knows it cheaply."""
         url = _str_param(q, "url")
         if not url:
             return self._json({"error": "missing url"}, 400)
-        if not resolve_target_allowed(url):
+        if not sources.resolve_allowed(url):
             return self._json({"error": "url not allowed"}, 400)
-        return self._json(landing_size(url))
+        return self._json(sources.size(_src(q), url))
 
     def _ep_resolve(self, q):
         url = _str_param(q, "url")
-        referer = _str_param(q, "referer", BASE + "/")
         if not url:
             return self._json({"error": "missing url"}, 400)
-        if not resolve_target_allowed(url):
+        if not sources.resolve_allowed(url):
             logger.warning("RESOLVE refused (not a file host): %s", url)
             return self._json({"error": "url not allowed"}, 400)
-        return self._json(resolve_info(url, referer))
+        # the host decides which chain to walk, so the tab the link came from
+        # does not have to be passed along
+        return self._json(sources.resolve(url, _str_param(q, "referer") or None))
 
     def _ep_file(self, q):
         direct = _str_param(q, "url")
         name = _str_param(q, "name", "download")
         if not direct:
             return self._json({"error": "missing url"}, 400)
-        if not direct_url_allowed(direct):
+        if not sources.file_allowed(direct):
             logger.warning("STREAM refused (not a direct file url): %s", direct)
             return self._json({"error": "url not allowed"}, 400)
         logger.info("STREAM request name=%s", name)
@@ -298,6 +303,11 @@ def _str_param(q, key, default=""):
     return (q.get(key) or [default])[0]
 
 
+def _src(q):
+    """Which source this request is for; unknown values fall back to default."""
+    return sources.norm(_str_param(q, "src", sources.DEFAULT))
+
+
 def _int_param(q, key, default):
     try:
         return int(_str_param(q, key, str(default)))
@@ -314,6 +324,8 @@ ROUTES = {
     "/robots.txt": Handler._ep_robots,
     "/favicon.svg": Handler._ep_favicon,
     "/healthz": Handler._ep_health,
+    "/api/sources": Handler._ep_sources,
+    "/api/menu": Handler._ep_menu,
     "/api/latest": Handler._ep_latest,
     "/api/search": Handler._ep_search,
     "/api/genres": Handler._ep_genres,
@@ -329,13 +341,15 @@ ROUTES = {
 
 def warm_cache(limit=24):
     """Prefetch the landing page so the first browser hit is already cached."""
-    try:
-        latest(limit)
-        # the chip row needs these before the first paint, not after it
-        logger.info("WARM catalog: %d genres, %d formats",
-                    len(genres()), len(formats()))
-    except Exception as e:
-        logger.warning("WARM failed: %s", e)
+    for src in (sources.NKIRI, sources.JAROCKS):
+        try:
+            sources.latest(src, limit)
+            # the chip row needs these before the first paint, not after it
+            chips = sources.menu(src)
+            logger.info("WARM %s: %d chips, %d formats",
+                        src, len(chips["chips"]), len(chips["formats"]))
+        except Exception as e:
+            logger.warning("WARM %s failed: %s", src, e)
 
 
 def main(argv=None):
