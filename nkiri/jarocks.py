@@ -480,6 +480,25 @@ def _clean_label(raw):
     return t
 
 
+_SXXEXX_RE = re.compile(r"\bS(\d{1,2})E(\d{1,3})\b", re.I)
+_EPISODE_WORD_RE = re.compile(r"\bepisode\b", re.I)
+
+
+def _label_for(label, href):
+    """A season header is not an episode name.
+
+    Some posts mark every row <em>EPISODE 3</em>. Others print one
+    <em>SEASON 6</em> above rows whose only identifier is S06E03 inside the
+    filename, so a header yields to that token and every row keeps a name.
+    """
+    if label and _EPISODE_WORD_RE.search(label):
+        return label
+    found = _SXXEXX_RE.search(urllib.parse.unquote(href))
+    if found:
+        return f"S{int(found.group(1)):02d}E{int(found.group(2)):02d}"
+    return label
+
+
 def find_links(content_html):
     """Download targets as [{label, text, url}].
 
@@ -490,7 +509,7 @@ def find_links(content_html):
     items, seen = [], set()
     for para in _PARA_RE.findall(content_html):
         em = _EM_RE.search(para) or _STRONG_RE.search(para)
-        label = _clean_label(em.group(1)) if em else ""
+        heading = _clean_label(em.group(1)) if em else ""
         for href, text in _ANCHOR_RE.findall(para):
             href = htmllib.unescape(href)
             if not href.startswith("http") or href in seen:
@@ -501,7 +520,7 @@ def find_links(content_html):
             if not _FILE_HOST_RE.search(host):
                 continue
             seen.add(href)
-            items.append({"label": label,
+            items.append({"label": _label_for(heading, href),
                           "text": strip_tags(text) or "Download",
                           "url": href})
     return items

@@ -94,6 +94,41 @@ class ListedFlagsTest(unittest.TestCase):
         self.assertEqual(self.flags([], {}), {})
 
 
+class EpisodeLabelTest(unittest.TestCase):
+    """Some posts name each row, others print one season header above rows
+    whose only identifier is inside the filename."""
+
+    def label(self, heading, url):
+        return jarocks._label_for(heading, url)
+
+    def test_a_season_header_yields_to_the_filename(self):
+        url = ("https://loadedfiles.net/27789ff5/Name.That.Tune.S06E02"
+               ".540p.X265.AAC.[9jaRocks.Com].mkv")
+        self.assertEqual(self.label("SEASON 6", url), "S06E02")
+
+    def test_an_episode_label_is_kept(self):
+        url = ("https://loadedfiles.net/ecc02930/The.Terrors.Of.Jordan"
+               ".Mendoza.S01E01.540p.mkv")
+        self.assertEqual(self.label("Episode 1", url), "Episode 1")
+
+    def test_a_three_digit_episode_keeps_its_digits(self):
+        url = "https://loadedfiles.net/x/Some.Show.S02E104.480p.mkv"
+        self.assertEqual(self.label("", url), "S02E104")
+
+    def test_nothing_to_go_on(self):
+        self.assertEqual(self.label("", "https://loadedfiles.net/x/file.mkv"), "")
+        self.assertEqual(self.label("SEASON 6", "https://loadedfiles.net/x/a.mkv"),
+                         "SEASON 6")
+
+    def test_percent_encoded_filenames_still_match(self):
+        url = "https://loadedfiles.net/x/Some%20Show%20S03E07.720p.mkv"
+        self.assertEqual(self.label("", url), "S03E07")
+
+    def test_single_letter_season_and_episode(self):
+        url = "https://loadedfiles.net/x/a.S1E2.mkv"
+        self.assertEqual(self.label("", url), "S01E02")
+
+
 class SizeParseTest(unittest.TestCase):
     """The file host prints the size beside the filename, and a plan blurb
     prints a bigger number further down the same page."""
