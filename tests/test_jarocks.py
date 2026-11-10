@@ -157,6 +157,51 @@ class SizeParseTest(unittest.TestCase):
         self.assertEqual(parse_size("200.55 MB"), 210291916)
 
 
+class SizeDispatchTest(unittest.TestCase):
+    """The size endpoint routes by host, so a client that sends no ?src —
+    a cached asset, a page opened from the watchlist — still gets an answer."""
+
+    def setUp(self):
+        from unittest import mock
+        self.mock = mock
+        self.calls = []
+
+    def run_size(self, src, url, jarocks_size, nkiri_size):
+        from nkiri import sources
+        def fake_jarocks(u):
+            self.calls.append("jarocks")
+            return {"size": jarocks_size, "bytes": None}
+        def fake_nkiri(u):
+            self.calls.append("nkiri")
+            return {"size": nkiri_size, "bytes": None}
+        with self.mock.patch.object(sources.jarocks, "size_info", fake_jarocks), \
+             self.mock.patch.object(sources, "landing_size", fake_nkiri):
+            return sources.size(src, url)
+
+    def test_a_loadedfiles_link_asks_9jarocks_whatever_the_tab(self):
+        url = "https://loadedfiles.net/7c2c984eeedd5d31"
+        for src in ("", "nkiri", "9ja"):
+            self.calls.clear()
+            got = self.run_size(src, url, "49.38 MB", None)
+            self.assertEqual(got["size"], "49.38 MB", src)
+            self.assertEqual(self.calls[0], "jarocks", src)
+
+    def test_a_downloadwella_link_asks_thenkiri(self):
+        url = "https://downloadwella.com/q2sx7wsr73ch/Other.Mommy.mkv.html"
+        got = self.run_size("9ja", url, None, "200.6 MB")
+        self.assertEqual(got["size"], "200.6 MB")
+
+    def test_the_other_resolver_is_tried_before_giving_up(self):
+        url = "https://loadedfiles.net/abc"
+        got = self.run_size("9ja", url, None, "12 MB")
+        self.assertEqual(got["size"], "12 MB")
+        self.assertEqual(self.calls, ["jarocks", "nkiri"])
+
+    def test_nothing_found_is_still_a_clean_answer(self):
+        got = self.run_size("9ja", "https://loadedfiles.net/abc", None, None)
+        self.assertEqual(got, {"size": None, "bytes": None})
+
+
 class CardParseTest(unittest.TestCase):
     PAGE = (
         '<li class="post-item is-trending">'

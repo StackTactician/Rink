@@ -153,10 +153,21 @@ def resolve(url, referer=None):
 
 
 def size(src, url):
-    """{size, bytes} for one link, when the source can answer cheaply."""
-    if norm(src) == JAROCKS:
-        return jarocks.size_info(url)
-    return landing_size(url)
+    """{size, bytes} for one link, when the source can answer cheaply.
+
+    The host decides first and the tab second: a link always points at one
+    site's file host, so a client that forgets ?src — an old cached asset, a
+    page opened from the watchlist — still gets the size it asked for instead
+    of an empty answer from the wrong resolver.
+    """
+    lookups = ((jarocks.size_info, landing_size)
+               if jarocks.resolve_host_allowed(url)
+               else (landing_size, jarocks.size_info))
+    for lookup in lookups:
+        found = lookup(url)
+        if found.get("size"):
+            return found
+    return {"size": None, "bytes": None}
 
 
 # ---------------------------------------------------------------- allowlists
