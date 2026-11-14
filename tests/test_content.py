@@ -1,6 +1,6 @@
 import unittest
 
-from nkiri.content import (
+from rink.sources.nkiri.post import (
     display_label,
     extract_synopsis,
     find_download_links,

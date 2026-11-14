@@ -1,6 +1,6 @@
 import unittest
 
-from nkiri.refs import parse_ref
+from rink.sources.nkiri.refs import parse_ref
 
 
 class RefsTest(unittest.TestCase):

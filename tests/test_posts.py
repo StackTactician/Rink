@@ -1,13 +1,15 @@
 import unittest
+
+from rink.sources.nkiri import state
 from unittest import mock
 
-from nkiri import posts
+from rink.sources.nkiri import posts
 
 
 class PaginationTest(unittest.TestCase):
     def setUp(self):
-        posts._latest_cache.clear()
-        posts._search_cache.clear()
+        state._latest_cache.clear()
+        state._search_cache.clear()
 
     def test_page_payload_shape(self):
         p = posts.page_payload([1], 2, 5, 11, 3)

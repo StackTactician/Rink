@@ -8,7 +8,7 @@ They can run together or apart.
 Any host that runs a Python process on `$PORT`. `render.yaml` covers Render:
 
 - Runtime `python`, build `pip install -r requirements.txt` (no packages needed),
-  start `python -m nkiri.web`.
+  start `python -m rink.web`.
 - The port comes from `$PORT`; a CLI argument still overrides it locally.
 - Free instances sleep when idle. First request after a sleep takes ~30-60s
   while the process boots and warms its caches.
@@ -17,10 +17,10 @@ Any host that runs a Python process on `$PORT`. `render.yaml` covers Render:
 
 ## Static page
 
-`nkiri/web/static` is the whole frontend: `index.html`, `app.js`, `style.css`,
+`rink/web/static` is the whole frontend: `index.html`, `app.js`, `style.css`,
 `config.js`, `fonts/`. No build step.
 
-Cloudflare Pages: root directory `nkiri/web/static`, no build command.
+Cloudflare Pages: root directory `rink/web/static`, no build command.
 
 Then point the page at the server, in `config.js`:
 
@@ -45,6 +45,6 @@ process serves the page itself. One-off override without committing:
 
 ## Without the split
 
-`python -m nkiri.web` serves the page and the API on one origin. Fewer moving
+`python -m rink.web` serves the page and the API on one origin. Fewer moving
 parts, no CORS, no cold start between the two halves - the only thing you lose
 is static hosting's CDN, which matters little for a LAN or single-user tool.

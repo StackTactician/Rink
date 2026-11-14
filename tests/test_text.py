@@ -1,6 +1,6 @@
 import unittest
 
-from nkiri.text import clean_title, human_size, strip_tags
+from rink.text import clean_title, human_size, strip_tags
 
 
 class TextTest(unittest.TestCase):

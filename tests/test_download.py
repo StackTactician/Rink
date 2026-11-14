@@ -1,6 +1,6 @@
 import unittest
 
-from nkiri.download import brand_name
+from rink.files import brand_name
 
 
 class BrandNameTest(unittest.TestCase):

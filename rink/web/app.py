@@ -1,0 +1,433 @@
+"""Rink web server: routes, JSON API, static files, download streaming.
+
+Run:  python3 -m rink.web [port]      (default 8321)
+"""
+
+import gzip
+import hashlib
+import json
+import logging
+import os
+import sys
+import threading
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from .. import sources
+from ..images import fetch_image, image_allowed
+from ..page import page_payload
+from ..text import human_size
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(STATIC_DIR)))
+LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
+LOG_FILE = os.path.join(LOG_DIR, "rink.log")
+
+logger = logging.getLogger("rink.web")
+
+
+def setup_logging(level=logging.INFO):
+    """File + stdout logging for the server (never configures the CLI)."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s",
+                            datefmt="%Y-%m-%d %H:%M:%S")
+    root = logging.getLogger("rink")
+    root.setLevel(level)
+    if not any(isinstance(h, logging.FileHandler) for h in root.handlers):
+        fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+    if not any(type(h) is logging.StreamHandler for h in root.handlers):
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+    return root
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "rink/2.0"
+    protocol_version = "HTTP/1.1"   # keep-alive: one socket per phone page load
+
+    def log_message(self, fmt, *a):
+        try:
+            request_line = a[0] if a else ""
+            status = a[1] if len(a) > 1 else "?"
+        except Exception:
+            request_line, status = "", "?"
+        logger.info("REQ %s %s -> %s", self.command, self.path, status)
+
+    # ------------------------------------------------------------ responses
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8",
+              cache="no-store", etag=True):
+        data = body.encode("utf-8") if isinstance(body, str) else body
+
+        # A revalidating browser costs one 304 instead of a full body, and the
+        # body is a pure function of the cache state, so a content hash is a
+        # correct validator. Only 200s get one: an error must not be pinned.
+        tag = None
+        if etag and code == 200:
+            tag = '"' + hashlib.sha1(data).hexdigest()[:20] + '"'
+            # If-None-Match uses weak comparison, and the proxy in front of us
+            # rewrites our ETag to W/"...", so strip the prefix before matching.
+            inm = (self.headers.get("If-None-Match") or "").strip()
+            if inm.startswith("W/"):
+                inm = inm[2:]
+            if inm == tag or inm == "*":
+                self.send_response(304)
+                self.send_header("ETag", tag)
+                self.send_header("Cache-Control", cache)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                return
+
+        gzipped = None
+        if len(data) >= 512 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            gzipped = gzip.compress(data, 6)
+            if len(gzipped) >= len(data):
+                gzipped = None
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        if gzipped is not None:
+            self.send_header("Content-Encoding", "gzip")
+            data = gzipped
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", cache)
+        if tag:
+            self.send_header("ETag", tag)
+        self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _json(self, obj, code=200):
+        # 30s fresh, then serve stale while revalidating in the background: a
+        # repeat navigation paints from cache and the 304 lands behind it.
+        self._send(code, json.dumps(obj),
+                   cache="public, max-age=30, stale-while-revalidate=600")
+
+    def _static(self, name, ctype):
+        path = os.path.join(STATIC_DIR, name)
+        if not os.path.exists(path):
+            self._send(404, "not found", "text/plain")
+            return
+        with open(path, "rb") as f:
+            self._send(200, f.read(), ctype, cache="public, max-age=3600")
+
+    # ------------------------------------------------------------- download
+
+    def _stream_file(self, direct, name, range_header=None, inline=False):
+        """Proxy a direct file URL so the browser fetch stays same-origin.
+
+        `range_header` is forwarded verbatim and the upstream status is passed
+        back, so a media element can seek: it asks for a byte window and gets
+        a 206 with its own Content-Range. Without it the whole file is sent,
+        which is what a download wants.
+        """
+        extra = {"Range": range_header} if range_header else None
+        try:
+            with sources.stream(direct, extra) as r:
+                status = getattr(r, "status", 200) or 200
+                ctype = (r.headers.get("Content-Type")
+                         or ("video/mp4" if inline else "application/octet-stream"))
+                clen = r.headers.get("Content-Length")
+                self.send_response(status)
+                self.send_header("Content-Type", ctype)
+                if clen:
+                    self.send_header("Content-Length", clen)
+                content_range = r.headers.get("Content-Range")
+                if content_range:
+                    self.send_header("Content-Range", content_range)
+                if inline:
+                    # a media element sits in a tab of its own: no attachment,
+                    # and seek support advertised
+                    self.send_header("Accept-Ranges", "bytes")
+                else:
+                    self.send_header("Content-Disposition",
+                                     _disposition(name))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                if not clen:
+                    # unknown length: HTTP/1.1 cannot delimit it, so close after
+                    self.send_header("Connection", "close")
+                    self.close_connection = True
+                self.end_headers()
+                sent = 0
+                while True:
+                    chunk = r.read(256 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    sent += len(chunk)
+                logger.info("STREAM OK %s (%s)", name, human_size(sent))
+        except (BrokenPipeError, ConnectionResetError):
+            logger.warning("STREAM aborted (client closed) %s", name)
+        except Exception as e:
+            logger.warning("STREAM error %s: %s", name, e)
+            try:
+                self.send_response(502)
+                self.end_headers()
+            except Exception:
+                pass
+
+    # ---------------------------------------------------------------- routes
+
+    def do_HEAD(self):
+        """Render's health check and any uptime pinger may use HEAD."""
+        u = urllib.parse.urlparse(self.path)
+        if u.path in ROUTES or u.path.startswith("/fonts/"):
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        path = u.path
+        q = urllib.parse.parse_qs(u.query)
+
+        try:
+            route = ROUTES.get(path)
+            if route is not None:
+                return route(self, q)
+            if path.startswith("/fonts/") and path.count("/") == 2:
+                return self._static(os.path.join("fonts", path[7:]), "font/woff")
+            self._send(404, "not found", "text/plain")
+        except Exception as e:
+            logger.exception("GET %s failed", self.path)
+            return self._json({"error": str(e)}, 500)
+
+    # ----------------------------------------------------------- endpoints
+
+    def _ep_sources(self, q):
+        """The toggle: which sites exist, and which one is the default."""
+        self._json({"sources": sources.source_list(), "default": sources.DEFAULT})
+
+    def _ep_menu(self, q):
+        """Chip row for one source. Each site keeps its own taxonomy."""
+        self._json(sources.menu(_src(q)))
+
+    def _ep_latest(self, q):
+        self._json(_proxied(sources.latest(_src(q), _int_param(q, "limit", 24),
+                                           _int_param(q, "page", 1))))
+
+    def _ep_search(self, q):
+        query = _str_param(q, "q")
+        limit = _int_param(q, "limit", 24)
+        page = _int_param(q, "page", 1)
+        if not query.strip():
+            return self._json(page_payload([], page, limit, 0, 0))
+        self._json(_proxied(sources.search(_src(q), query, limit, page)))
+
+    def _ep_genres(self, q):
+        # nkiri-only shape, kept for old clients; /api/menu is the real one
+        self._json({"genres": sources.menu(sources.NKIRI)["chips"]})
+
+    def _ep_formats(self, q):
+        self._json({"formats": sources.menu(sources.NKIRI)["formats"]})
+
+    def _ep_browse(self, q):
+        self._json(_proxied(sources.browse(_src(q), _str_param(q, "tag"),
+                                           _str_param(q, "cat"),
+                                           _int_param(q, "limit", 24),
+                                           _int_param(q, "page", 1))))
+
+    def _ep_post(self, q):
+        src = _src(q)
+        pid = sources.parse_ref(src, _str_param(q, "id"))
+        if not pid:
+            return self._json({"error": "not found"}, 404)
+        view = sources.post(src, pid)
+        view["poster"] = _proxy_poster(view.get("poster"))
+        return self._json(view)
+
+    def _ep_size(self, q):
+        """File size for one download link, when the source knows it cheaply."""
+        url = _str_param(q, "url")
+        if not url:
+            return self._json({"error": "missing url"}, 400)
+        if not sources.resolve_allowed(url):
+            return self._json({"error": "url not allowed"}, 400)
+        return self._json(sources.size(_src(q), url))
+
+    def _ep_resolve(self, q):
+        url = _str_param(q, "url")
+        if not url:
+            return self._json({"error": "missing url"}, 400)
+        if not sources.resolve_allowed(url):
+            logger.warning("RESOLVE refused (not a file host): %s", url)
+            return self._json({"error": "url not allowed"}, 400)
+        # the host decides which chain to walk, so the tab the link came from
+        # does not have to be passed along
+        return self._json(sources.resolve(url, _str_param(q, "referer") or None))
+
+    def _ep_file(self, q):
+        direct = _str_param(q, "url")
+        name = _str_param(q, "name", "download")
+        if not direct:
+            return self._json({"error": "missing url"}, 400)
+        if not sources.file_allowed(direct):
+            logger.warning("STREAM refused (not a direct file url): %s", direct)
+            return self._json({"error": "url not allowed"}, 400)
+        logger.info("STREAM request name=%s", name)
+        return self._stream_file(direct, name)
+
+    def _ep_stream(self, q):
+        """Play a file in the browser's own media player.
+
+        The tab opens on this URL, so the response is inline video with Range
+        passed through: the phone's player can seek without downloading the
+        whole file first, and the CDN's referer requirement is met here rather
+        than by the browser.
+        """
+        direct = _str_param(q, "url")
+        name = _str_param(q, "name", "video.mp4")
+        if not direct:
+            return self._json({"error": "missing url"}, 400)
+        if not sources.file_allowed(direct):
+            logger.warning("PLAY refused (not a direct file url): %s", direct)
+            return self._json({"error": "url not allowed"}, 400)
+        logger.info("PLAY request name=%s", name)
+        return self._stream_file(direct, name,
+                                 range_header=self.headers.get("Range"),
+                                 inline=True)
+
+    def _ep_img(self, q):
+        """Same-origin poster proxy: the phone never talks to the CDN itself."""
+        url = _str_param(q, "u")
+        if not image_allowed(url):
+            return self._send(404, "not found", "text/plain")
+        hit = fetch_image(url)
+        if not hit:
+            return self._send(404, "not found", "text/plain")
+        data, ctype = hit
+        self._send(200, data, ctype, cache="public, max-age=604800, immutable")
+
+    # ------------------------------------------------------------- static
+
+    def _ep_index(self, q):
+        self._static("index.html", "text/html; charset=utf-8")
+
+    def _ep_js(self, q):
+        self._static("app.js", "application/javascript; charset=utf-8")
+
+    def _ep_css(self, q):
+        self._static("style.css", "text/css; charset=utf-8")
+
+    def _ep_config(self, q):
+        self._static("config.js", "application/javascript; charset=utf-8")
+
+    def _ep_robots(self, q):
+        self._static("robots.txt", "text/plain; charset=utf-8")
+
+    def _ep_favicon(self, q):
+        self._static("favicon.svg", "image/svg+xml")
+
+    def _ep_health(self, q):
+        """Liveness only. The health check must not do the index route's work."""
+        self._send(200, "ok", "text/plain; charset=utf-8", etag=False)
+
+def _proxy_poster(url):
+    """A same-origin /api/img link for an upstream poster.
+
+    The engine hands out the real URL; only this interface rewrites it. That
+    keeps the phone off the other sites' CDNs without teaching the core what
+    a web path looks like.
+    """
+    if not url or not image_allowed(url):
+        return url
+    return "/api/img?u=" + urllib.parse.quote(url, safe="")
+
+
+def _proxied(payload):
+    """Point every card's poster at the local image proxy."""
+    for item in payload.get("items") or ():
+        item["poster"] = _proxy_poster(item.get("poster"))
+    return payload
+
+
+def _disposition(name):
+    """attachment header, ASCII-safe for old clients + RFC 5987 for the rest."""
+    ascii_name = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
+    quoted = urllib.parse.quote(name, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}"
+
+
+def _str_param(q, key, default=""):
+    return (q.get(key) or [default])[0]
+
+
+def _src(q):
+    """Which source this request is for; unknown values fall back to default."""
+    return sources.norm(_str_param(q, "src", sources.DEFAULT))
+
+
+def _int_param(q, key, default):
+    try:
+        return int(_str_param(q, key, str(default)))
+    except ValueError:
+        return default
+
+
+ROUTES = {
+    "/": Handler._ep_index,
+    "/index.html": Handler._ep_index,
+    "/app.js": Handler._ep_js,
+    "/style.css": Handler._ep_css,
+    "/config.js": Handler._ep_config,
+    "/robots.txt": Handler._ep_robots,
+    "/favicon.svg": Handler._ep_favicon,
+    "/healthz": Handler._ep_health,
+    "/api/sources": Handler._ep_sources,
+    "/api/menu": Handler._ep_menu,
+    "/api/latest": Handler._ep_latest,
+    "/api/search": Handler._ep_search,
+    "/api/genres": Handler._ep_genres,
+    "/api/formats": Handler._ep_formats,
+    "/api/browse": Handler._ep_browse,
+    "/api/post": Handler._ep_post,
+    "/api/resolve": Handler._ep_resolve,
+    "/api/size": Handler._ep_size,
+    "/api/file": Handler._ep_file,
+    "/api/stream": Handler._ep_stream,
+    "/api/img": Handler._ep_img,
+}
+
+
+def warm_cache(limit=24):
+    """Prefetch the landing page so the first browser hit is already cached."""
+    for src in (sources.NKIRI, sources.JAROCKS, sources.MOVIBOX):
+        try:
+            sources.latest(src, limit)
+            # the chip row needs these before the first paint, not after it
+            chips = sources.menu(src)
+            logger.info("WARM %s: %d chips, %d formats",
+                        src, len(chips["chips"]), len(chips["formats"]))
+        except Exception as e:
+            logger.warning("WARM %s failed: %s", src, e)
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    # hosts set $PORT; the CLI argument still wins for local runs
+    port = int(argv[0] if argv else os.environ.get("PORT", "8321"))
+    setup_logging()
+    threading.Thread(target=warm_cache, daemon=True).start()
+
+    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    logger.info("=" * 60)
+    logger.info("SESSION START  port=%d  pid=%d  log=%s", port, os.getpid(), LOG_FILE)
+    print(f"rink web running:   http://localhost:{port}")
+    print(f"logging to          {LOG_FILE}")
+    print("(open on your phone via http://<this-computer-ip>:%d)" % port)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\nbye")
+
+
+if __name__ == "__main__":
+    main()

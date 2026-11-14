@@ -6,7 +6,7 @@ your own machine or from a terminal.
 ## Browser
 
 ```
-python3 -m nkiri.web
+python3 -m rink.web
 ```
 
 Open `http://localhost:8321`, or that address with this machine's IP from a
@@ -15,10 +15,10 @@ phone on the same network. Search, open a title, pick a file, download.
 ## Terminal
 
 ```
-python3 -m nkiri search "resident evil"
-python3 -m nkiri list
-python3 -m nkiri show 143755
-python3 -m nkiri download 143755
+python3 -m rink search "resident evil"
+python3 -m rink list
+python3 -m rink show 143755
+python3 -m rink download 143755
 ```
 
 `143755` stands for any post id or full thenkiri.com link.

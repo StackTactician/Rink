@@ -1,6 +1,6 @@
 name: pages
 
-# Publishes nkiri/web/static to GitHub Pages. No build step: the directory is
+# Publishes rink/web/static to GitHub Pages. No build step: the directory is
 # the whole frontend. Routing is hash-based (#/g/..., #/s/...), so Pages needs
 # no rewrite rules and no 404.html fallback.
 #
@@ -11,7 +11,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "nkiri/web/static/**"
+      - "rink/web/static/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -37,7 +37,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: nkiri/web/static
+          path: rink/web/static
 
       - id: deployment
         uses: actions/deploy-pages@v4

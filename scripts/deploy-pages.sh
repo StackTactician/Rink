@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Deploy nkiri/web/static to Cloudflare Pages without wrangler or node.
+# Deploy rink/web/static to Cloudflare Pages without wrangler or node.
 #
 # Cloudflare's direct-upload flow, as wrangler implements it:
 #   1. GET  /accounts/{acct}/pages/projects/{proj}/upload-token   -> jwt
@@ -19,7 +19,7 @@ set -euo pipefail
 PROJECT="${CF_PROJECT:-k-rink}"
 BRANCH="${1:-main}"
 API="https://api.cloudflare.com/client/v4"
-SRC="$(cd "$(dirname "$0")/../nkiri/web/static" && pwd)"
+SRC="$(cd "$(dirname "$0")/../rink/web/static" && pwd)"
 
 ctype() {
   case "$1" in

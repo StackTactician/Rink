@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 
-from nkiri import catalog
+from rink.sources.nkiri import listing as catalog
 
 
 TAGS = [

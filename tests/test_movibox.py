@@ -7,7 +7,7 @@ with the player route as its referer — that referer is the whole gate.
 
 import unittest
 
-from nkiri import movibox
+from rink.sources import movibox
 
 
 class WantedTest(unittest.TestCase):

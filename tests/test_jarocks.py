@@ -6,7 +6,7 @@ path reads, so these tests pin the decisions rather than the plumbing.
 
 import unittest
 
-from nkiri import jarocks
+from rink.sources import jarocks
 
 
 class FilmOrShowTest(unittest.TestCase):
@@ -153,7 +153,7 @@ class SizeParseTest(unittest.TestCase):
         self.assertIsNone(self.parse("<html>nothing to see</html>"))
 
     def test_parse_size_agrees(self):
-        from nkiri.text import parse_size
+        from rink.text import parse_size
         self.assertEqual(parse_size("200.55 MB"), 210291916)
 
 
@@ -167,7 +167,7 @@ class SizeDispatchTest(unittest.TestCase):
         self.calls = []
 
     def run_size(self, src, url, jarocks_size, nkiri_size):
-        from nkiri import sources
+        from rink import sources
         def fake_jarocks(u):
             self.calls.append("jarocks")
             return {"size": jarocks_size, "bytes": None}

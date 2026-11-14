@@ -11,7 +11,7 @@ import os
 import unittest
 
 CORE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "nkiri")
+                    "rink")
 
 
 def _core_sources():
@@ -58,7 +58,7 @@ class RegistryTest(unittest.TestCase):
         self.assertIn("sources.post(", body)
 
     def test_every_listed_source_normalises_to_itself(self):
-        from nkiri import sources
+        from rink import sources
         for entry in sources.source_list():
             self.assertEqual(sources.norm(entry["id"]), entry["id"])
 

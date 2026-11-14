@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m nkiri.web
+    startCommand: python -m rink.web
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
@@ -21,7 +21,7 @@ services:
     name: rink-ui
     runtime: static
     plan: free
-    staticPublishPath: ./nkiri/web/static
+    staticPublishPath: ./rink/web/static
     headers:
       - path: /fonts/*
         name: Cache-Control
