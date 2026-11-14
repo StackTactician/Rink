@@ -429,6 +429,9 @@ def post_view(path):
                 "bytes": f["bytes"] or None,
                 "name": name + ".mp4",
                 "play": True,
+                # the client groups these into one row per episode and offers
+                # the qualities as a choice, so the number travels separately
+                "resolution": res or None,
                 "season": se if multi else None,
                 "episode": ep if multi else None,
             })

@@ -528,30 +528,74 @@ async function detail(id){
   const status=document.createElement("div");status.className="prog-txt";
   let activeBtn=null,activeLab=null;
 
+  /* One row per thing you can get, not per file. A source that offers the
+     same episode in three qualities is a choice, so the qualities fold into
+     a menu and the row acts on whatever it is showing. A source that has one
+     file per row renders exactly as before. */
   function linkList(links){
     const list=document.createElement("div");list.className="dl-list";
+
+    const order=[],byKey=new Map();
     links.forEach(lk=>{
+      // a group is one thing you can get: an episode, or a film's single file.
+      // A source that only says "which quality" still groups, because that is
+      // a choice about one file; a source that says neither is told apart by
+      // filename alone, which is not reliable, so its rows stay separate.
+      let k=null;
+      if(lk.season!=null&&lk.episode!=null)k=lk.season+":"+lk.episode;
+      else if(lk.resolution!=null)k="__single__";
+      if(k===null){order.push({links:[lk]});return;}
+      if(!byKey.has(k)){const g={links:[]};byKey.set(k,g);order.push(g);}
+      byKey.get(k).links.push(lk);
+    });
+
+    order.forEach(g=>{
+      // best quality first, so the menu opens on 1080p when it exists
+      g.links.sort((a,b)=>(b.resolution||0)-(a.resolution||0));
       const row=document.createElement("div");row.className="dl-row";
       const info=document.createElement("div");info.className="dl-ep";
       const l=document.createElement("div");l.className="l";
-      l.textContent=lk.label||lk.text||"File";
+      // the label carries the quality on a loose row only; grouped rows show
+      // the quality in the menu instead
+      l.textContent=(g.links[0].label||g.links[0].text||"File").split(" · ")[0];
       info.appendChild(l);
+
+      let pick=null;
+      if(g.links.length>1){
+        pick=document.createElement("select");pick.className="dl-q";
+        pick.setAttribute("aria-label","quality");
+        g.links.forEach((lk,i)=>{
+          const o=document.createElement("option");
+          o.value=String(i);
+          o.textContent=(lk.resolution?lk.resolution+"p":"Option "+(i+1))
+                        +(lk.size?"  ·  "+lk.size:"");
+          pick.appendChild(o);
+        });
+        info.appendChild(pick);
+      }
+      const current=()=>pick?g.links[+pick.value]:g.links[0];
+
       // label and size live in separate spans: the label changes during the
       // download, the size must survive it
       const btn=document.createElement("button");btn.className="btn btn-dl";
       const lab=document.createElement("span");lab.className="dl-lbl";lab.textContent="Download";
       const sz=document.createElement("span");sz.className="dl-size";
       btn.appendChild(lab);btn.appendChild(sz);
-      // a size the post page already printed costs no request
-      if(lk.size)sz.textContent=lk.size;
-      else sizeEls.set(lk.url,sz);
-      btn.onclick=()=>startDl(lk,btn,lab,status);
+      const syncSize=()=>{
+        const lk=current();
+        if(lk.size){sz.textContent=lk.size;}
+        else{sz.textContent="";sizeEls.set(lk.url,sz);}
+      };
+      syncSize();
+      if(pick)pick.onchange=syncSize;
+      btn.onclick=()=>startDl(current(),btn,lab,status);
       // a source that streams gets a second button: the file opens in its own
       // tab and the browser's own player takes it from there
-      if(lk.play){
+      if(g.links.some(lk=>lk.play)){
         const play=document.createElement("button");
         play.className="btn btn-play";play.textContent="Play";
         play.onclick=()=>{
+          const lk=current();
           const u=apiUrl("/api/stream?url="+encodeURIComponent(lk.url)
                         +"&name="+encodeURIComponent(lk.name||"video.mp4"));
           window.open(u,"_blank","noopener");
