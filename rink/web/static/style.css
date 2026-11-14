@@ -240,7 +240,6 @@ main{
    ratio is right: contain shows the whole poster, and the panel colour fills
    whatever the crop used to hide. Both sources take contain here — a detail
    page is one big picture, so losing its edges is never the right trade. */
-.poster.src-nkiri{aspect-ratio:10/7}
 .poster img{object-fit:contain}
 .poster img:not(.on){opacity:0}
 .d-title{

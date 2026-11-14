@@ -19,13 +19,19 @@ from .net import open_stream
 
 logger = logging.getLogger(__name__)
 
-#: hosts whose images we will fetch on the browser's behalf
-IMAGE_HOSTS = frozenset({"thenkiri.com", "www.thenkiri.com",
-                         "9jarocks.net", "www.9jarocks.net"})
+#: hosts whose images we will fetch on the browser's behalf, taken from the
+#: sources themselves: a new source declares its hosts in its META and this
+#: list follows, so the proxy cannot fall behind the catalogue
+def _hosts():
+    from .sources import SOURCES
+    exact, suffixes = set(), set()
+    for _src, meta in SOURCES:
+        for host in meta.get("image_hosts", ()):
+            (suffixes if host.startswith(".") else exact).add(host)
+    return frozenset(exact), tuple(sorted(suffixes))
 
-#: a source whose artwork lives on a family of CDN subdomains: movibox serves
-#: covers from pbcdn / pbcdnw / h5-static, and the exact host changes per image
-IMAGE_HOST_SUFFIXES = (".aoneroom.com",)
+
+IMAGE_HOSTS, IMAGE_HOST_SUFFIXES = _hosts()
 
 _MAX_IMAGE_BYTES = 40 * 1024 * 1024
 _images = OrderedDict()       # url -> (bytes, ctype), LRU

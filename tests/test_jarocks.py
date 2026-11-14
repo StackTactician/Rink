@@ -175,7 +175,7 @@ class SizeDispatchTest(unittest.TestCase):
             self.calls.append("nkiri")
             return {"size": nkiri_size, "bytes": None}
         with self.mock.patch.object(sources.jarocks, "size_info", fake_jarocks), \
-             self.mock.patch.object(sources, "landing_size", fake_nkiri):
+             self.mock.patch.object(sources.nkiri, "size_info", fake_nkiri):
             return sources.size(src, url)
 
     def test_a_loadedfiles_link_asks_9jarocks_whatever_the_tab(self):

@@ -1,7 +1,8 @@
 """Source registry: more than one site behind the same JSON shapes.
 
 Everything the web layer and the CLI ask for goes through here, so a new site
-means one module and one entry in SOURCES — no endpoint changes.
+means one module and one entry in `_MODULES` — no endpoint changes, and no
+branch anywhere else.
 
 Three sources exist today:
 
@@ -12,6 +13,24 @@ Three sources exist today:
 All three are peers under `sources/`, each a package with the same shape:
 config, state, its own http or api, listing, post, resolve. Nothing about one
 lives above or beside the others; what they share is in `rink/` itself.
+
+**What a source has to provide.** Each package exports a `META` dict and the
+same handful of functions, and this module never asks which one it is talking
+to:
+
+    META            id, label, site, kind, aliases, can_size, has_formats,
+                    poster_aspect, image_hosts
+    chips()         the chip row, in this source's own taxonomy
+    formats()       the second axis, or [] when the site has only one
+    latest()        newest uploads
+    browse()        one page of a category
+    search()        one page of hits
+    parse_ref()     a post id from a number or a URL
+    post_view()     the detail view model
+    resolve_info()  a download link -> {direct, name, size}
+    size_info()     {size, bytes} for one link
+    file_host_allowed() / resolve_host_allowed() / file_referer()
+    clear_cache()
 
 Post ids are per-site and can collide, so every id and every cache key that
 carries one is namespaced by source upstream of this module.
@@ -24,146 +43,115 @@ import urllib.parse
 from ..net import open_stream
 from ..page import page_payload
 from . import jarocks, movibox, nkiri
-from .nkiri import BASE, browse as _nkiri_browse
-from .nkiri import (direct_url_allowed, format_names, formats, genre_names,
-                    genres, get_post, landing_size, latest as _nkiri_latest,
-                    parse_post_view, public, resolve_info, resolve_target_allowed,
-                    search_results)
-from .nkiri import parse_ref as _nkiri_ref
 
 logger = logging.getLogger(__name__)
 
-NKIRI = "nkiri"
-JAROCKS = "9ja"
-MOVIBOX = "movibox"
-DEFAULT = NKIRI
+#: display order, and the only place a source is named. Adding one is a line
+#: here plus its package; nothing below this line knows any of them by name.
+_MODULES = (nkiri, jarocks, movibox)
 
-#: ordered: the toggle renders in this order
-SOURCES = (
-    (NKIRI, {"label": "Nkiri", "site": "https://thenkiri.com",
-             "kind": "genre"}),
-    (JAROCKS, {"label": "9jarocks", "site": "https://9jarocks.net",
-               "kind": "category"}),
-    (MOVIBOX, {"label": "MoviBox", "site": "https://movibox.net",
-               "kind": "category"}),
-)
+SOURCES = tuple((m.META["id"], m.META) for m in _MODULES)
 _IDS = tuple(src for src, _meta in SOURCES)
+DEFAULT = _MODULES[0].META["id"]
+
+#: every id and alias a client might send, mapped to the id it means
+_ALIASES = {alias: m.META["id"] for m in _MODULES for alias in m.META["aliases"]}
+_ALIASES.update({src: src for src in _IDS})
+
+#: the old constants, kept because the web layer and the tests name them
+NKIRI, JAROCKS, MOVIBOX = _IDS
 
 
 def norm(src):
-    """Only a known source id passes; anything else is the default."""
-    src = (src or "").strip().lower()
-    if src in ("jarocks", "9jarocks"):
-        return JAROCKS
-    if src in ("movi", "movibox.net"):
-        return MOVIBOX
-    return src if src in _IDS else DEFAULT
+    """Only a known source id or alias passes; anything else is the default."""
+    return _ALIASES.get((src or "").strip().lower(), DEFAULT)
+
+
+def mod(src):
+    """The package behind a source id."""
+    wanted = norm(src)
+    for m in _MODULES:
+        if m.META["id"] == wanted:
+            return m
+    return _MODULES[0]
 
 
 def meta(src):
-    src = norm(src)
-    return dict(next(m for s, m in SOURCES if s == src), id=src)
+    return dict(mod(src).META)
 
 
 def source_list():
-    """For the toggle: [{id, label}] in display order."""
-    return [{"id": src, "label": m["label"]} for src, m in SOURCES]
+    """For the toggle: everything the browser needs to draw a source."""
+    return [{"id": m.META["id"], "label": m.META["label"],
+             "site": m.META["site"], "kind": m.META["kind"],
+             "can_size": m.META["can_size"],
+             "has_formats": m.META["has_formats"],
+             "poster_aspect": m.META["poster_aspect"]}
+            for m in _MODULES]
 
 
 # ------------------------------------------------------------------ listing
 
 def menu(src):
-    """Chip row for one source: its own taxonomy, nothing merged.
-
-    nkiri files genres as tags and origin as categories, so it gets both.
-    jarocks only has real categories, and those are the chips.
-    """
-    src = norm(src)
-    if src == MOVIBOX:
-        return {"id": src, "kind": "category", "chips": movibox.menu(),
-                "formats": []}
-    if src == JAROCKS:
-        return {"id": src, "kind": "category",
-                "chips": [{k: c[k] for k in ("slug", "name", "count")}
-                          for c in jarocks.menu()],
-                "formats": []}
-    return {"id": src, "kind": "genre",
-            "chips": public(genres()), "formats": public(formats())}
+    """Chip row for one source: its own taxonomy, nothing merged."""
+    m = mod(src)
+    return {"id": m.META["id"], "kind": m.META["kind"],
+            "chips": m.chips(), "formats": m.formats()}
 
 
 def latest(src, limit=24, page=1):
-    src = norm(src)
-    if src == MOVIBOX:
-        return movibox.latest(limit, page)
-    if src == JAROCKS:
-        return jarocks.latest(limit, page)
-    return _nkiri_latest(limit, page)
+    return mod(src).latest(limit, page)
 
 
 def browse(src, slug="", cat="", limit=24, page=1):
-    src = norm(src)
-    if src == MOVIBOX:
-        # movibox has one axis too: slug is one of its home rows
-        return movibox.browse(slug, limit, page)
-    if src == JAROCKS:
-        # jarocks has one axis: slug is a category
-        return jarocks.browse(slug, limit, page)
-    return _nkiri_browse(slug, cat, limit, page)
+    return mod(src).browse(slug, limit, page, cat)
 
 
 def search(src, query, limit=24, page=1):
-    src = norm(src)
     if not (query or "").strip():
         return page_payload([], page, limit, 0, 0)
-    if src == MOVIBOX:
-        return movibox.search(query, limit, page)
-    if src == JAROCKS:
-        return jarocks.search(query, limit, page)
-    return search_results(query, limit, page)
+    return mod(src).search(query, limit, page)
 
 
 # --------------------------------------------------------------------- post
 
 def parse_ref(src, ref):
-    src = norm(src)
-    if src == MOVIBOX:
-        return movibox.parse_ref(ref)
-    if src == JAROCKS:
-        return jarocks.parse_ref(ref)
-    return _nkiri_ref(ref)
+    return mod(src).parse_ref(ref)
 
 
 def post(src, ref):
     """Detail view model. Posters are upstream URLs: turning one into a
     same-origin /api/img link is the web layer's job, not the engine's."""
-    src = norm(src)
-    if src == MOVIBOX:
-        view = movibox.post_view(ref)
-    elif src == JAROCKS:
-        view = jarocks.post_view(int(ref))
-    else:
-        view = parse_post_view(get_post(int(ref)))
-        view["genres"] = genre_names(view.pop("tag_ids", []))
-        view["formats"] = format_names(view.pop("cat_ids", []))
+    m = mod(src)
+    view = m.post_view(ref)
     # the card/star machinery keys watchlist entries by src, so carry it back
-    view["src"] = src
+    view["src"] = m.META["id"]
     return view
 
 
 # ---------------------------------------------------------------- resolving
+#
+# A link always points at one site's file host, so the host decides which
+# source answers — a link pasted from the wrong tab still works.
+
+def _owner(url):
+    """The source whose file hosts include this URL, or None."""
+    for m in _MODULES:
+        if m.file_host_allowed(url) or m.resolve_host_allowed(url):
+            return m
+    return None
+
 
 def resolve(url, referer=None):
-    """Resolve a download link from either site. The host decides, so a link
-    pasted from the wrong tab still works."""
-    host = urllib.parse.urlparse(url or "").hostname or ""
-    if movibox.file_host_allowed(url):
-        return movibox.resolve_info(url)
-    if jarocks.resolve_host_allowed(url) or jarocks.file_host_allowed(url):
-        return jarocks.resolve_info(url)
-    if not host:
+    """Resolve a download link from any site."""
+    owner = _owner(url)
+    if owner is not None:
+        return owner.resolve_info(url)
+    if not (urllib.parse.urlparse(url or "").hostname or ""):
         raise ValueError("missing url")
-    # thenkiri's 2-step form expects the post page as its referer
-    return resolve_info(url, referer or (BASE + "/"))
+    # an unknown host: the default source's chain is the only one that takes a
+    # referer, and it is the one a bare link has always meant
+    return _MODULES[0].resolve_info(url, referer or (_MODULES[0].META["site"] + "/"))
 
 
 def size(src, url):
@@ -174,14 +162,16 @@ def size(src, url):
     page opened from the watchlist — still gets the size it asked for instead
     of an empty answer from the wrong resolver.
     """
-    if movibox.file_host_allowed(url):
-        # the size came with the link; a movibox file page has nothing to add
+    owner = _owner(url)
+    if owner is not None and not owner.META["can_size"]:
+        # the size came with the link; its file page has nothing to add
         return {"size": None, "bytes": None}
-    lookups = ((jarocks.size_info, landing_size)
-               if jarocks.resolve_host_allowed(url)
-               else (landing_size, jarocks.size_info))
-    for lookup in lookups:
-        found = lookup(url)
+    order = ([owner] if owner is not None else []) + [m for m in _MODULES
+                                                      if m is not owner]
+    for m in order:
+        if not m.META["can_size"]:
+            continue
+        found = m.size_info(url)
         if found.get("size"):
             return found
     return {"size": None, "bytes": None}
@@ -202,20 +192,17 @@ def _public_host(host):
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
-def file_allowed(url):
+def _url_ok(url):
     p = urllib.parse.urlparse(url or "")
-    if p.scheme not in ("http", "https") or not _public_host(p.hostname or ""):
-        return False
-    return (direct_url_allowed(url) or jarocks.file_host_allowed(url)
-            or movibox.file_host_allowed(url))
+    return p.scheme in ("http", "https") and _public_host(p.hostname or "")
+
+
+def file_allowed(url):
+    return _url_ok(url) and any(m.file_host_allowed(url) for m in _MODULES)
 
 
 def resolve_allowed(url):
-    p = urllib.parse.urlparse(url or "")
-    if p.scheme not in ("http", "https") or not _public_host(p.hostname or ""):
-        return False
-    return (resolve_target_allowed(url) or jarocks.resolve_host_allowed(url)
-            or movibox.file_host_allowed(url))
+    return _url_ok(url) and any(m.resolve_host_allowed(url) for m in _MODULES)
 
 
 def file_referer(url, fallback=None):
@@ -224,7 +211,11 @@ def file_referer(url, fallback=None):
     A downloader that shells out to curl needs this: the movibox CDN answers
     429 to a request that arrives without a movibox referer.
     """
-    return movibox.file_referer(url) or fallback
+    for m in _MODULES:
+        referer = m.file_referer(url)
+        if referer:
+            return referer
+    return fallback
 
 
 def stream(url, headers=None):
@@ -235,12 +226,12 @@ def stream(url, headers=None):
     browser — the phone never talks to the CDN itself.
     """
     extra = dict(headers or {})
-    referer = movibox.file_referer(url)
+    referer = file_referer(url)
     if referer:
         extra.setdefault("Referer", referer)
     return open_stream(url, headers=extra)
 
 
 def clear_cache():
-    jarocks.clear_cache()
-    movibox.clear_cache()
+    for m in _MODULES:
+        m.clear_cache()

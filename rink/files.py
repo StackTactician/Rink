@@ -21,17 +21,43 @@ logger = logging.getLogger(__name__)
 # Files arrive named like "The.Assassin.S02E01.(THENKIRI.COM).mkv".
 # Strip the source-site tag and brand the file with ours instead.
 BRAND = "Rink"
-_SITE_TAG_RE = re.compile(
-    r"[._\- ]*[\(\[\{]?\s*(?:www\.)?(?:thenkiri\.com|nkiri\.ink|nkiri\.com|"
-    r"thenkiri|nkiri|dramakey\.com|dramakey|9jarocks\.net|9jarocks|"
-    r"movibox\.net|movibox)\s*[\)\]\}]?[._\- ]*",
-    re.I)
+
+
+def _site_tag_names():
+    """Every name a filename might carry, taken from the sources themselves.
+
+    A new source adds its names to its META and the downloader strips them
+    with no change here.
+    """
+    from .sources import SOURCES
+    names = set()
+    for _src, meta in SOURCES:
+        names.add(meta["site"].split("//", 1)[-1].split("/")[0])
+        names.add(meta["label"])
+        names.update(meta.get("file_tags", ()))
+    # longest first, so "thenkiri.com" is tried before "thenkiri"
+    return sorted((n for n in names if n), key=len, reverse=True)
+
+
+_TAG_RE = None
+
+
+def _site_tag_re():
+    """Built on first use, not at import: the sources import this module."""
+    global _TAG_RE
+    if _TAG_RE is None:
+        _TAG_RE = re.compile(
+            r"[._\- ]*[\(\[\{]?\s*(?:www\.)?(?:"
+            + "|".join(re.escape(n) for n in _site_tag_names())
+            + r")\s*[\)\]\}]?[._\- ]*",
+            re.I)
+    return _TAG_RE
 
 
 def brand_name(name):
     """'The.Assassin.S02E01.(THENKIRI.COM).mkv' -> 'The.Assassin.S02E01.Rink.mkv'."""
     stem, ext = os.path.splitext(name)
-    stem = _SITE_TAG_RE.sub(".", stem)
+    stem = _site_tag_re().sub(".", stem)
     stem = re.sub(r"[._\- ]{2,}", ".", stem).strip("._- ")
     if not stem:
         stem = "download"

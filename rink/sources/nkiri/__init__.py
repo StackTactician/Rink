@@ -44,3 +44,54 @@ __all__ = [
     "menu", "browse", "latest", "search", "post_view", "parse_ref",
     "resolve_direct", "resolve_info", "landing_size", "clear_cache",
 ]
+
+
+#: What this source is, and what it can do. The registry reads this instead of
+#: keeping its own copy, so a new source is one module and no edits elsewhere.
+META = {
+    "id": "nkiri",
+    "label": "Nkiri",
+    "site": BASE,
+    "kind": "genre",
+    "aliases": ("thenkiri", "thenkiri.com"),
+    #: the landing page states the size, for one GET we were making anyway
+    "can_size": True,
+    #: genres *and* formats are both chips here; the others have one axis
+    "has_formats": True,
+    #: detail posters are 700 tall at 600-1000 wide: a wide box, not a 2:3 one
+    "poster_aspect": "10/7",
+    "file_tags": ("thenkiri", "nkiri.ink", "nkiri.com", "nkiri", "dramakey.com", "dramakey"),
+    "image_hosts": ("thenkiri.com", "www.thenkiri.com"),
+}
+
+
+#: the registry asks every source for `search`; this one calls it search_results
+search = search_results
+
+
+def chips():
+    """The chip row: this source's own genres."""
+    return public(genres())
+
+
+def post_view(ref):
+    """Detail view, with the tag/category ids resolved to names."""
+    view = parse_post_view(get_post(int(ref)))
+    view["genres"] = genre_names(view.pop("tag_ids", []))
+    view["formats"] = format_names(view.pop("cat_ids", []))
+    return view
+
+
+def size_info(url):
+    """Size from the landing page: it prints one and costs a single GET."""
+    return landing_size(url)
+
+
+def file_referer(url):
+    """downloadwella wants no referer, so there is nothing to carry."""
+    return None
+
+
+#: the names the registry uses are this source's own names for the same thing
+file_host_allowed = direct_url_allowed
+resolve_host_allowed = resolve_target_allowed

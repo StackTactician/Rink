@@ -106,7 +106,7 @@ def latest(limit=24, page=1):
     return state._home_cache.get_or_set(("latest", limit, page), fetch)
 
 
-def browse(slug="", limit=24, page=1):
+def browse(slug="", limit=24, page=1, cat=""):
     """One home row. Rows are fixed-length, so there is only ever one page."""
     if not slug:
         return latest(limit, page)

@@ -21,12 +21,12 @@
      finishing TLS here overlaps with parsing app.js instead of stalling the
      first /api call. Harmless when the page is served by the API itself. -->
 <link rel="preconnect" href="https://rink.onrender.com" crossorigin>
-<link rel="stylesheet" href="style.css?v=26">
+<link rel="stylesheet" href="style.css?v=27">
 </head>
 <body>
 <header class="top">
   <a class="brand" href="#/">Rink</a>
-  <!-- filled from SOURCES in app.js: one button per source, no markup to edit -->
+  <!-- filled from /api/sources: one button per source, no markup to edit -->
   <nav class="sources" id="sources" role="group" aria-label="source"></nav>
   <form class="search" id="searchForm" autocomplete="off">
     <input id="searchInput" type="search" placeholder="Search movies, series, dramas..." aria-label="search">
@@ -55,6 +55,6 @@
 </template>
 
 <script src="config.js?v=14"></script>
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>

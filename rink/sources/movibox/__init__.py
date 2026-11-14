@@ -62,3 +62,32 @@ __all__ = [
     "file_host_allowed", "file_referer", "resolve_host_allowed",
     "resolve_info", "size_info", "clear_cache",
 ]
+
+
+#: What this source is, and what it can do. See `sources.META` docs.
+META = {
+    "id": "movibox",
+    "label": "MoviBox",
+    "site": BASE,
+    "kind": "category",
+    "aliases": ("movi", "movibox.net"),
+    #: the API states every file's size inline, so there is nothing to ask for
+    #: and a per-episode round trip would only repeat what we were told
+    "can_size": False,
+    #: one axis: its own home rows
+    "has_formats": False,
+    #: covers are 2:3 posters
+    "poster_aspect": "2/3",
+    "file_tags": ("movibox.net", "movibox"),
+    "image_hosts": (".aoneroom.com",),
+}
+
+
+def chips():
+    """The chip row: the site's own home rows."""
+    return menu()
+
+
+def formats():
+    """No second axis on this site."""
+    return []

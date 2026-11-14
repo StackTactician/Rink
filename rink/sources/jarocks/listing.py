@@ -178,7 +178,7 @@ def _category_url(slug, page):
     return BASE + path + "/"
 
 
-def browse(slug="", limit=24, page=1):
+def browse(slug="", limit=24, page=1, cat=""):
     """One page of a category, or the newest uploads when no category given."""
     if not slug:
         return latest(limit, page)

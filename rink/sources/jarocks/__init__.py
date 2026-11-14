@@ -51,3 +51,37 @@ __all__ = [
     "find_links", "resolve_direct", "resolve_info", "size_info",
     "file_host_allowed", "resolve_host_allowed", "clear_cache",
 ]
+
+
+#: What this source is, and what it can do. See `sources.META` docs.
+META = {
+    "id": "9ja",
+    "label": "9jarocks",
+    "site": BASE,
+    "kind": "category",
+    "aliases": ("jarocks", "9jarocks", "9jarocks.net"),
+    #: the size is on the file host's landing page, one GET per episode
+    "can_size": True,
+    #: one axis only: the site's own categories
+    "has_formats": False,
+    #: browsing a category serves 390x220 stills, newest-uploads serves posters,
+    #: so no single ratio is right and the box takes whatever arrives
+    "poster_aspect": None,
+    "file_tags": ("9jarocks.net", "9jarocks"),
+    "image_hosts": ("9jarocks.net", "www.9jarocks.net"),
+}
+
+
+def chips():
+    """The chip row: the site's own film/show categories, biggest first."""
+    return [{k: c[k] for k in ("slug", "name", "count")} for c in menu()]
+
+
+def formats():
+    """No second axis on this site."""
+    return []
+
+
+def file_referer(url):
+    """loadedfiles wants no referer."""
+    return None

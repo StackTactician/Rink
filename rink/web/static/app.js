@@ -13,19 +13,25 @@ const chipsEl = $("#chips");
 const sourcesEl = $("#sources");
 
 /* ---------------- sources ----------------
-   Two sites behind one UI. The choice lives in the URL ("#/9ja/s/avatar") so
-   a shared link keeps it, and in localStorage so the next visit opens on the
-   one that was picked. Every API call carries ?src= because post ids collide
-   between the two sites. */
-const SOURCES = [{id: "nkiri", label: "Nkiri"}, {id: "9ja", label: "9jarocks"},
-                 {id: "movibox", label: "MoviBox"}];
-const DEFAULT_SOURCE = "nkiri";
-/* both sites can answer, but 9jarocks answers per file (one GET per episode
-   row), so it is the slower of the two on a long season. movibox needs no
-   lookup at all: its sizes arrive with the links. */
-const CAN_SIZE = {nkiri: true, "9ja": true, movibox: false};
+   Several sites behind one UI. The choice lives in the URL ("#/9ja/s/avatar")
+   so a shared link keeps it, and in localStorage so the next visit opens on
+   the one that was picked. Every API call carries ?src= because post ids
+   collide between sites.
+
+   The list is the server's, not this file's. /api/sources carries every
+   source with what it can do, so a new one appears in the toggle with no edit
+   here — and a source that cannot answer a size question says so itself
+   instead of being listed in a map that drifts. */
+let SOURCES = [];
+let DEFAULT_SOURCE = "nkiri";
 const SOURCE_KEY = "rink.src";
 let source = DEFAULT_SOURCE;
+
+/* what this source can do, from the server's own description of it */
+function sourceMeta(id){
+  return SOURCES.find(x => x.id === id) || {};
+}
+function canSize(id){ return !!sourceMeta(id).can_size; }
 
 function storedSource(){
   try{
@@ -482,11 +488,13 @@ async function detail(id){
 
   const d=document.createElement("div");d.className="detail";
   // poster
-  /* the source rides along as a class: thenkiri's detail posters are 700 tall
-     at anything from 600 to 1000 wide, 9jarocks' are a steady 2:3, so one
-     fixed box for both would crop one of them */
+  /* the box takes the shape the source says its posters have: thenkiri's are
+     wide, 9jarocks' are 2:3, and a source that states neither gets the CSS
+     default rather than a rule of its own */
   const poster=document.createElement("div");
-  poster.className="poster src-"+source;
+  poster.className="poster";
+  const aspect=sourceMeta(source).poster_aspect;
+  if(aspect)poster.style.aspectRatio=aspect;
   const ph=document.createElement("span");ph.className="ph";ph.textContent="rink";
   poster.appendChild(ph);
   if(p.poster){
@@ -676,7 +684,7 @@ async function detail(id){
   async function fillSizes(token,links){
     // only thenkiri prints a size on a page that is cheap to read; for the
     // other source this would be one wasted round trip per episode
-    if(!CAN_SIZE[source])return;
+    if(!canSize(source))return;
     links=links.filter(lk=>!lk.size);
     if(!links.length)return;
     const LIMIT=3;
@@ -843,7 +851,26 @@ searchBox.addEventListener("input",()=>{
 /* Paint the list first, fill the chip row when the menu lands. Awaiting the
    menu here serialised two round trips in front of the first card.
    renderChips() is a no-op on an empty catalog and runs again on arrival. */
-buildSourceButtons();
-paintSource();
-route();
-loadMenu();
+/* One small request before the first paint, because the toggle and the URL
+   parser both need to know which sources exist. It fails open: a page that
+   cannot reach /api/sources still renders the default source. */
+async function loadSources(){
+  try{
+    const j = await getJSON("/api/sources");
+    if(j && j.sources && j.sources.length){
+      SOURCES = j.sources;
+      DEFAULT_SOURCE = j.default || SOURCES[0].id;
+      source = storedSource();
+      return;
+    }
+  }catch(e){/* fall through to the seed */}
+  SOURCES = [{id: DEFAULT_SOURCE, label: DEFAULT_SOURCE, can_size: true}];
+}
+
+(async function boot(){
+  await loadSources();
+  buildSourceButtons();
+  paintSource();
+  route();
+  loadMenu();
+})();
