@@ -104,6 +104,78 @@ class EpisodesTest(unittest.TestCase):
         self.assertEqual(movibox._episodes([]), [(0, 0)])
 
 
+class EnumerateTest(unittest.TestCase):
+    """Search is counted by reading it once.
+
+    The API's own `totalCount` is not the number of rows it will serve — a
+    query reporting 67 returns 31 — so the count comes from the pages
+    themselves, and only a capped read reports a lower bound.
+    """
+
+    def setUp(self):
+        self._saved = movibox._search_page
+        self._saved_cap = movibox._MAX_PAGES
+        movibox._enum_cache.clear()
+
+    def tearDown(self):
+        movibox._search_page = self._saved
+        movibox._MAX_PAGES = self._saved_cap
+        movibox._enum_cache.clear()
+
+    def _pages(self, pages):
+        """Serve a fixed page -> (items, has_more, hint) map."""
+        def fake(query, page):
+            return pages.get(page, ([], False, 0))
+        return fake
+
+    def _item(self, pid):
+        return {"id": pid}
+
+    def test_one_page_needs_no_more_requests(self):
+        movibox._search_page = self._pages(
+            {1: ([self._item("a"), self._item("b")], False, 2)})
+        items, complete = movibox._enumerate("x")
+        self.assertEqual([i["id"] for i in items], ["a", "b"])
+        self.assertTrue(complete)
+
+    def test_a_season_repeat_is_one_card(self):
+        movibox._search_page = self._pages(
+            {1: ([self._item("a"), self._item("a")], False, 2)})
+        items, _ = movibox._enumerate("x")
+        self.assertEqual([i["id"] for i in items], ["a"])
+
+    def test_every_page_is_read_and_the_count_is_exact(self):
+        movibox._search_page = self._pages({
+            1: ([self._item("a"), self._item("b")], True, 8),
+            2: ([self._item("c")], True, 8),
+            3: ([self._item("d")], False, 8),
+        })
+        items, complete = movibox._enumerate("x")
+        self.assertEqual([i["id"] for i in items], ["a", "b", "c", "d"])
+        self.assertTrue(complete)
+
+    def test_a_read_that_hits_the_cap_says_it_is_a_lower_bound(self):
+        movibox._MAX_PAGES = 3
+
+        def fake(query, page):
+            return [self._item(f"p{page}")], True, 900
+        movibox._search_page = fake
+        items, complete = movibox._enumerate("x")
+        self.assertEqual(len(items), 3)
+        self.assertFalse(complete)
+
+    def test_an_early_page_does_not_end_the_read(self):
+        """hasMore belongs to the last page of a wave, not to any of them."""
+        movibox._search_page = self._pages({
+            1: ([self._item("a")], True, 4),
+            2: ([self._item("b")], True, 4),
+            3: ([], False, 4),
+        })
+        items, complete = movibox._enumerate("x")
+        self.assertEqual([i["id"] for i in items], ["a", "b"])
+        self.assertTrue(complete)
+
+
 class FilesTest(unittest.TestCase):
     """Play is asked first: it is the only endpoint that lists every quality.
 

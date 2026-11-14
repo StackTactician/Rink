@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 _home_cache = TTLCache(ttl=300)
 _menu_cache = TTLCache(ttl=3600)
 _search_cache = TTLCache(ttl=300)
+_enum_cache = TTLCache(ttl=300)
 _detail_cache = TTLCache(ttl=600)
 _files_cache = TTLCache(ttl=300)
 
@@ -268,35 +269,112 @@ def browse(slug="", limit=24, page=1):
     return _menu_cache.get_or_set(("browse", str(slug), limit), fetch)
 
 
+#: the API caps a page at 30 whatever perPage asks for, and its own
+#: `totalCount` is not the number of rows it will hand over (a query that
+#: reports 67 returns 31), so a real count means reading every page. Pages are
+#: fetched in waves of three and the whole answer is cached, which makes the
+#: count exact and every later page of the same search free.
+_PAGE_SIZE = 30
+_WAVE = 3
+_MAX_PAGES = 9
+
+
+def _search_page(query, page):
+    """One page of hits, as cards. Returns (items, has_more, total_hint)."""
+    try:
+        data = _api("/subject/search",
+                    body={"keyword": query, "page": page,
+                          "perPage": _PAGE_SIZE})
+    except NkiriError as e:
+        logger.warning("movibox search failed %r p%d: %s", query, page, e)
+        return [], False, 0
+    items = []
+    for subject in data.get("items") or ():
+        if _wanted(subject):
+            items.append(_item(subject))
+    pager = data.get("pager") or {}
+    try:
+        hint = int(pager.get("totalCount") or 0)
+    except (TypeError, ValueError):
+        hint = 0
+    return items, bool(pager.get("hasMore")), hint
+
+
+def _enumerate(query):
+    """Every hit for a query, deduped, in the API's order.
+
+    Returns (items, complete). `complete` is False when the cap was reached,
+    which is the only case where the count is a lower bound rather than a
+    number.
+    """
+    return _enum_cache.get_or_set(query.lower(),
+                                  lambda: _enumerate_uncached(query))
+
+
+def _enumerate_uncached(query):
+    items, seen = [], set()
+
+    def absorb(found):
+        for item in found:
+            # a series comes back once per season, all sharing one detailPath,
+            # so the card is the same card: keep the first
+            if item["id"] in seen:
+                continue
+            seen.add(item["id"])
+            items.append(item)
+
+    first, more, hint = _search_page(query, 1)
+    absorb(first)
+    if not more:
+        return items, True
+
+    # The API caps a page at 30 but usually returns fewer, so its totalCount
+    # overstates how many pages there are. What one page actually held is the
+    # better divisor, and it turns the whole read into a single parallel wave
+    # for a typical query instead of one round trip per page.
+    per_page = max(1, len(first))
+    estimate = min(_MAX_PAGES, max(2, -(-hint // per_page) if hint else _WAVE))
+    page = 2
+    while page <= _MAX_PAGES:
+        wave = list(range(page, min(page + estimate, _MAX_PAGES + 1)))
+        if not wave:
+            break
+        with ThreadPoolExecutor(max_workers=len(wave)) as pool:
+            results = list(pool.map(lambda p: _search_page(query, p), wave))
+        for found, _has_more, _hint in results:
+            absorb(found)
+        # only the last page of the wave says whether there is more: an
+        # earlier page's hasMore is about pages already fetched
+        more = results[-1][1]
+        if not more:
+            return items, True
+        page += len(wave)
+    return items, False
+
+
 def search(query, limit=24, page=1):
-    """Search. The API pages by itself and returns the poster with the hit."""
+    """Search, paged from one cached enumeration.
+
+    The API's own paging is not trustworthy — it reports more pages than it
+    will serve, and its total is not the number of rows — so the whole result
+    set is read once and sliced here. That is what makes the count exact and
+    the page numbers honest.
+    """
     query = (query or "").strip()
     if not query:
         return page_payload([], page, limit)
 
     def fetch():
-        try:
-            data = _api("/subject/search",
-                        body={"keyword": query, "page": page,
-                              "perPage": limit})
-        except NkiriError as e:
-            logger.warning("movibox search failed %r: %s", query, e)
-            return page_payload([], page, limit)
-        # a series comes back once per season, all sharing one detailPath, so
-        # the card is the same card: keep the first (the newest season)
-        items, seen = [], set()
-        for subject in data.get("items") or ():
-            if not _wanted(subject):
-                continue
-            item = _item(subject)
-            if item["id"] in seen:
-                continue
-            seen.add(item["id"])
-            items.append(item)
-        pager = data.get("pager") or {}
-        more = bool(pager.get("hasMore"))
-        return page_payload(items, page, limit, total=None,
-                            total_pages=(page + 1) if more else page)
+        items, complete = _enumerate(query)
+        start = max(0, (page - 1) * limit)
+        window = items[start:start + limit]
+        if complete:
+            pages = max(1, (len(items) + limit - 1) // limit)
+            return page_payload(window, page, limit, total=len(items),
+                                total_pages=pages)
+        # the cap was hit: say how many pages are known, not how many exist
+        return page_payload(window, page, limit, total=None,
+                            total_pages=page + 1)
 
     return _search_cache.get_or_set((query.lower(), limit, page), fetch)
 
@@ -480,7 +558,7 @@ def size_info(url):
 
 
 def clear_cache():
-    for cache in (_home_cache, _menu_cache, _search_cache, _detail_cache,
-                  _files_cache):
+    for cache in (_home_cache, _menu_cache, _search_cache, _enum_cache,
+                  _detail_cache, _files_cache):
         cache.clear()
     _token["value"], _token["at"] = None, 0.0
