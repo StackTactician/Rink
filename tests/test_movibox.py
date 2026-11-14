@@ -104,6 +104,54 @@ class EpisodesTest(unittest.TestCase):
         self.assertEqual(movibox._episodes([]), [(0, 0)])
 
 
+class FilesTest(unittest.TestCase):
+    """Play is asked first: it is the only endpoint that lists every quality.
+
+    `/subject/download` marks the 1080p row vipLocked and withholds its URL,
+    while `/subject/play` — what the site's own player calls — returns it with
+    a working link. Asking download first would silently drop 1080p.
+    """
+
+    def setUp(self):
+        self._saved = movibox._api
+        self.calls = []
+        movibox._files_cache.clear()
+
+    def tearDown(self):
+        movibox._api = self._saved
+        movibox._files_cache.clear()
+
+    def _fake(self, play_rows, download_rows):
+        def api(path, referer=None, body=None):
+            endpoint = path.split("?")[0].rsplit("/", 1)[-1]
+            self.calls.append(endpoint)
+            if endpoint == "play":
+                return {"streams": play_rows}
+            return {"downloads": download_rows}
+        return api
+
+    def test_play_supplies_every_quality(self):
+        movibox._api = self._fake(
+            [{"resolutions": "1080", "url": "https://cdn/x1080.mp4", "size": "900"},
+             {"resolutions": "360", "url": "https://cdn/x360.mp4", "size": "300"}], [])
+        files = movibox._files("1", "a-b", 1, 1)
+        self.assertEqual([f["resolution"] for f in files], [1080, 360])
+        self.assertEqual(self.calls, ["play"])
+
+    def test_download_is_the_fallback(self):
+        """A title that publishes no streams still gets its files."""
+        movibox._api = self._fake(
+            [], [{"resolution": 480, "url": "https://cdn/x.mp4", "size": "400"}])
+        files = movibox._files("1", "a-b", 1, 1)
+        self.assertEqual([f["resolution"] for f in files], [480])
+        self.assertEqual(self.calls, ["play", "download"])
+
+    def test_a_locked_row_without_a_url_is_not_a_link(self):
+        movibox._api = self._fake(
+            [{"resolutions": "1080", "url": "", "size": "900", "vipLocked": True}], [])
+        self.assertEqual(movibox._files("1", "a-b", 1, 1), [])
+
+
 class LinkTest(unittest.TestCase):
     def test_a_signed_mp4_is_the_file(self):
         url = ("https://bcdnw.hakunaymatata.com/bt/abc.mp4"

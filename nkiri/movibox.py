@@ -18,6 +18,12 @@ obvious:
     is the whole gate. This is why every probe without it looked like the
     catalogue had no files.
 
+  * **Play and download disagree about quality.** ``/subject/download`` marks
+    the 1080p row ``vipLocked`` and withholds its URL; ``/subject/play``, the
+    endpoint the site's own player calls, returns every resolution with a
+    working link to an anonymous client. The file is the same, so play is
+    asked first and download is only the fallback.
+
 Files are plain MP4 on ``*.hakunaymatata.com`` behind a signed query string.
 The CDN honours Range, so a file can be streamed or resumed, but it answers
 429 to a request that arrives without a movibox referer — hence
@@ -318,20 +324,38 @@ def _safe_name(text):
 
 
 def _files(subject_id, path, se, ep):
-    """One episode's files: [{resolution, url, size, codec}]."""
-    key = (subject_id, se, ep)
+    """One episode's files: [{resolution, url, size, codec}].
+
+    Asked of `/subject/play`, not `/subject/download`. The two endpoints
+    disagree: download marks the 1080p row `vipLocked` and withholds its URL,
+    while play — the endpoint the site's own player uses — returns every
+    resolution with a working link, to an anonymous client. The file is the
+    same either way, so the play answer is the complete one, and it is what
+    makes a quality choice possible at all.
+
+    `/subject/download` is still asked when play comes back empty, so a title
+    that only publishes downloads is not lost.
+    """
+    key = (subject_id, path, se, ep)
 
     def fetch():
-        try:
-            data = _api(f"/subject/download?subjectId={subject_id}&se={se}"
-                        f"&ep={ep}&detailPath={urllib.parse.quote(path)}",
-                        referer=PLAY_ROUTE + urllib.parse.quote(path))
-        except NkiriError as e:
-            logger.warning("movibox files failed %s s%s e%s: %s",
-                           path, se, ep, e)
-            return []
+        quoted = urllib.parse.quote(path)
+        referer = PLAY_ROUTE + quoted
+        rows = []
+        for endpoint, field in (("play", "streams"), ("download", "downloads")):
+            try:
+                data = _api(f"/subject/{endpoint}?subjectId={subject_id}"
+                            f"&se={se}&ep={ep}&detailPath={quoted}",
+                            referer=referer)
+            except NkiriError as e:
+                logger.warning("movibox %s failed %s s%s e%s: %s",
+                               endpoint, path, se, ep, e)
+                continue
+            rows = data.get(field) or []
+            if any(r.get("url") for r in rows):
+                break
         out = []
-        for row in data.get("downloads") or ():
+        for row in rows:
             url = row.get("url")
             if not url:
                 continue
@@ -339,8 +363,11 @@ def _files(subject_id, path, se, ep):
                 size = int(row.get("size") or 0)
             except (TypeError, ValueError):
                 size = 0
-            out.append({"resolution": row.get("resolution") or 0,
-                        "url": url, "bytes": size,
+            try:
+                resolution = int(row.get("resolutions") or row.get("resolution") or 0)
+            except (TypeError, ValueError):
+                resolution = 0
+            out.append({"resolution": resolution, "url": url, "bytes": size,
                         "codec": row.get("codecName") or ""})
         out.sort(key=lambda f: -f["resolution"])
         return out
