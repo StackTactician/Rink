@@ -38,7 +38,7 @@ class GenresTest(unittest.TestCase):
 
     def test_browse_unknown_slug_is_empty(self):
         with mock.patch.object(catalog, "api_get", return_value=TAGS):
-            res = catalog.browse("nonsense", "", 24, 1)
+            res = catalog.browse("nonsense", 24, 1)
         self.assertEqual(res["items"], [])
         self.assertEqual(res["page"], 1)
 

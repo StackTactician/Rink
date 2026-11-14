@@ -27,11 +27,20 @@ _ARIA_RE = re.compile(r'aria-label="([^"]*)"')
 _WP_THUMB_SUFFIX_RE = re.compile(r"-\d+x\d+(?=\.[A-Za-z]{2,4}$)")
 
 
+def _https(url):
+    """The site still prints http:// on older uploads; its own host serves
+    https, and the image proxy only carries https, so a bare http image would
+    be dropped and the card left with a placeholder."""
+    if (url or "").startswith("http://"):
+        return "https://" + url[len("http://"):]
+    return url
+
+
 def _full_poster(url):
     """The uncropped original behind a resized listing thumbnail."""
-    return _WP_THUMB_SUFFIX_RE.sub("", url or "")
+    return _https(_WP_THUMB_SUFFIX_RE.sub("", url or ""))
 _THUMB_RE = re.compile(
-    r'(?:data-src|src)="(https://9jarocks\.net/wp-content/uploads/[^"]+)"', re.I)
+    r'(?:data-src|src)="(https?://9jarocks\.net/wp-content/uploads/[^"]+)"', re.I)
 
 _FEED_ITEM_RE = re.compile(r"<item>(.*?)</item>", re.S)
 _FEED_DATE_RE = re.compile(r"<pubDate>(.*?)</pubDate>", re.S)
@@ -120,7 +129,7 @@ def _feed_page(page):
         title = re.search(r"<title>(.*?)</title>", raw, re.S)
         date = _FEED_DATE_RE.search(raw)
         poster = re.search(
-            r'<img[^>]+src="(https://9jarocks\.net/wp-content/uploads/[^"]+)"',
+            r'<img[^>]+src="(https?://9jarocks\.net/wp-content/uploads/[^"]+)"',
             raw, re.I)
         items.append({
             "id": pid,

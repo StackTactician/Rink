@@ -128,8 +128,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with sources.stream(direct, extra) as r:
                 status = getattr(r, "status", 200) or 200
-                ctype = (r.headers.get("Content-Type")
-                         or ("video/mp4" if inline else "application/octet-stream"))
+                ctype = r.headers.get("Content-Type") or ""
+                if inline and ctype in ("", "application/octet-stream",
+                                        "binary/octet-stream"):
+                    # a browser opens an octet-stream in a download manager,
+                    # not a player, so an inline copy names the real type
+                    ctype = _video_type(name)
                 clen = r.headers.get("Content-Length")
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)
@@ -151,9 +155,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Connection", "close")
                     self.close_connection = True
                 self.end_headers()
+                # an upstream that honours Range closes after its own window,
+                # but one that answers 206 and keeps sending would have us
+                # copy the whole file for a 256 KB seek — so the advertised
+                # length is the stop, not the end of the stream
+                want = int(clen) if clen and clen.isdigit() else None
                 sent = 0
-                while True:
-                    chunk = r.read(256 * 1024)
+                while want is None or sent < want:
+                    size = 256 * 1024 if want is None else min(256 * 1024,
+                                                               want - sent)
+                    chunk = r.read(size)
                     if not chunk:
                         break
                     self.wfile.write(chunk)
@@ -347,6 +358,21 @@ def _proxied(payload):
     for item in payload.get("items") or ():
         item["poster"] = _proxy_poster(item.get("poster"))
     return payload
+
+
+#: what a browser will actually play, by extension. A CDN that answers
+#: application/octet-stream would otherwise land in the download manager.
+_VIDEO_TYPES = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+    ".mkv": "video/x-matroska", ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo", ".ts": "video/mp2t",
+}
+
+
+def _video_type(name):
+    """The media type for a filename, or octet-stream for anything else."""
+    ext = os.path.splitext(name or "")[1].lower()
+    return _VIDEO_TYPES.get(ext, "application/octet-stream")
 
 
 def _disposition(name):

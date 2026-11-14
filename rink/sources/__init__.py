@@ -202,7 +202,14 @@ def file_allowed(url):
 
 
 def resolve_allowed(url):
-    return _url_ok(url) and any(m.resolve_host_allowed(url) for m in _MODULES)
+    """Can /api/resolve be pointed at this URL?
+
+    `_owner` is the allowlist: a source that walks a chain says so with
+    resolve_host_allowed, and one that hands out the file itself — movibox —
+    answers with file_host_allowed. Asking only the first rejected every link
+    that needed no chain.
+    """
+    return _url_ok(url) and _owner(url) is not None
 
 
 def file_referer(url, fallback=None):

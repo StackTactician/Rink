@@ -38,6 +38,29 @@ class ContractTest(unittest.TestCase):
             self.assertEqual(sources.norm(entry["id"]), entry["id"])
             self.assertIs(sources.mod(entry["id"]), sources.mod(entry["id"]))
 
+    def test_browse_takes_the_shared_argument_order(self):
+        """The registry calls browse(slug, limit, page, cat) positionally.
+
+        A source that names the same values in a different order gets them
+        silently transposed instead of raising, which is how nkiri's tag
+        filter came to return nothing at all.
+        """
+        import inspect
+        for module in sources._MODULES:
+            params = list(inspect.signature(module.browse).parameters)
+            self.assertEqual(params[:4], ["slug", "limit", "page", "cat"],
+                             f"{module.__name__}.browse{params}")
+
+    def test_latest_and_search_take_the_shared_argument_order(self):
+        import inspect
+        for module in sources._MODULES:
+            latest = list(inspect.signature(module.latest).parameters)
+            self.assertEqual(latest[:2], ["limit", "page"],
+                             f"{module.__name__}.latest{latest}")
+            search = list(inspect.signature(module.search).parameters)
+            self.assertEqual(search[:3], ["query", "limit", "page"],
+                             f"{module.__name__}.search{search}")
+
     def test_an_alias_reaches_the_same_package(self):
         for module in sources._MODULES:
             for alias in module.META["aliases"]:

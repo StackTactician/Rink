@@ -134,8 +134,14 @@ def find(rows, slug):
     return None
 
 
-def browse(tag="", cat="", limit=24, page=1):
-    """One page of posts filtered by genre slug and/or format slug."""
+def browse(slug="", limit=24, page=1, cat=""):
+    """One page of posts filtered by genre slug and/or format slug.
+
+    The argument order is the one every source takes — (slug, limit, page,
+    cat) — because the registry calls them alike and cannot know that this
+    site's first axis is called a tag.
+    """
+    tag = slug
     key = (tag, cat, limit, page)
 
     def fetch():
