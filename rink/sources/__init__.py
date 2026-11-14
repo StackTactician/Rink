@@ -104,7 +104,27 @@ def latest(src, limit=24, page=1):
 
 
 def browse(src, slug="", cat="", limit=24, page=1):
-    return mod(src).browse(slug, limit, page, cat)
+    """One page of one category, and nothing else.
+
+    These sites answer a category that does not exist by serving their
+    homepage — a 200 with somebody else's posts in it. Passed through, a
+    request for a gone category would quietly return an unrelated page, so
+    the slug is checked against the source's own taxonomy first and anything
+    it does not list comes back empty. An empty taxonomy means the lookup
+    failed rather than that nothing matches, so the source still answers.
+    """
+    m = mod(src)
+    if slug:
+        known = {c.get("slug") for c in m.chips()}
+        if known and slug not in known:
+            logger.info("browse: %s has no category %r", m.META["id"], slug)
+            return page_payload([], page, limit)
+    if cat:
+        known = {f.get("slug") for f in m.formats()}
+        if known and cat not in known:
+            logger.info("browse: %s has no format %r", m.META["id"], cat)
+            return page_payload([], page, limit)
+    return m.browse(slug, limit, page, cat)
 
 
 def search(src, query, limit=24, page=1):

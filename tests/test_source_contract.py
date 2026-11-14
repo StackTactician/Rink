@@ -154,17 +154,19 @@ class FakeSource:
 class FourthSourceTest(unittest.TestCase):
     """Add a source, change nothing else, and watch it appear everywhere."""
 
-    def setUp(self):
-        self._saved = sources._MODULES
-        FakeSource.calls = []
-        sources._MODULES = self._saved + (FakeSource,)
-        # the lookup tables are derived at import, so rebuild them the way a
-        # real module would have been present for
+    def register(self, *extra):
+        """Add modules the way a real one would be present at import."""
+        sources._MODULES = self._saved + (FakeSource,) + extra
         sources.SOURCES = tuple((m.META["id"], m.META) for m in sources._MODULES)
         sources._ALIASES = {a: m.META["id"] for m in sources._MODULES
                             for a in m.META["aliases"]}
         sources._ALIASES.update({m.META["id"]: m.META["id"]
                                  for m in sources._MODULES})
+
+    def setUp(self):
+        self._saved = sources._MODULES
+        FakeSource.calls = []
+        self.register()
 
     def tearDown(self):
         sources._MODULES = self._saved
@@ -191,6 +193,42 @@ class FourthSourceTest(unittest.TestCase):
         self.assertEqual(sources.menu("fake")["chips"][0]["slug"], "all")
         self.assertEqual(sources.menu("fake")["formats"], [])
 
+    def test_an_unknown_category_is_empty_not_the_site_fallback(self):
+        """A site answers a missing category with its homepage. Passed
+        through, that is somebody else's posts under the wrong heading."""
+        got = sources.browse("fakesrc", "no-such-category", limit=5)
+        self.assertEqual(got["items"], [])
+        self.assertEqual(got["page"], 1)
+        # and a category it does list still answers
+        self.assertTrue(sources.browse("fakesrc", "all", limit=5)["items"])
+
+    def test_an_unknown_format_is_empty_too(self):
+        class WithFormats(FakeSource):
+            META = dict(FakeSource.META, id="withfmt", aliases=("withfmt",))
+            __name__ = "rink.sources.withfmt"
+
+            @classmethod
+            def formats(cls):
+                return [{"slug": "dubbed", "name": "Dubbed", "count": 1}]
+
+        self.register(WithFormats)
+        self.assertEqual(sources.browse("withfmt", "", "no-such-format",
+                                        limit=5)["items"], [])
+        self.assertTrue(sources.browse("withfmt", "", "dubbed", limit=5)["items"])
+
+    def test_a_failed_taxonomy_does_not_empty_every_page(self):
+        """No chips means the lookup failed, not that nothing matches."""
+        class Blind(FakeSource):
+            META = dict(FakeSource.META, id="blind", aliases=("blind",))
+            __name__ = "rink.sources.blind"
+
+            @classmethod
+            def chips(cls):
+                return []
+
+        self.register(Blind)
+        self.assertTrue(sources.browse("blind", "anything", limit=5)["items"])
+
     def test_its_hosts_answer_for_itself(self):
         url = "https://fake.example/x.mp4"
         self.assertTrue(sources.file_allowed(url))
@@ -207,7 +245,7 @@ class FourthSourceTest(unittest.TestCase):
             def file_host_allowed(cls, url):
                 return "nosize.example" in (url or "")
 
-        sources._MODULES = sources._MODULES + (NoSize,)
+        self.register(NoSize)
         self.assertEqual(sources.size("nosize", "https://nosize.example/x.mp4"),
                          {"size": None, "bytes": None})
         self.assertNotIn("size", NoSize.calls)

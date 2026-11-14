@@ -241,7 +241,11 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"formats": sources.menu(sources.NKIRI)["formats"]})
 
     def _ep_browse(self, q):
-        self._json(_proxied(sources.browse(_src(q), _str_param(q, "tag"),
+        # the first axis is a category slug on every source, so `slug` is the
+        # name that means the same thing everywhere; `tag` is the older spelling
+        # this endpoint shipped with and still has to answer
+        slug = _str_param(q, "slug") or _str_param(q, "tag")
+        self._json(_proxied(sources.browse(_src(q), slug,
                                            _str_param(q, "cat"),
                                            _int_param(q, "limit", 24),
                                            _int_param(q, "page", 1))))
