@@ -24,7 +24,6 @@ from .catalog import format_names, formats, genre_names, genres, public
 from .content import parse_post_view
 from .download import (direct_url_allowed, landing_size, resolve_info,
                        resolve_target_allowed)
-from .media import proxy_url
 from .net import open_stream
 from .posts import get_post, latest as _nkiri_latest, page_payload
 from .posts import search_results
@@ -90,22 +89,12 @@ def menu(src):
             "chips": public(genres()), "formats": public(formats())}
 
 
-def _proxy_list(payload):
-    """Point every poster at the local image proxy, as thenkiri's lists do.
-
-    Same-origin keeps the phone off the other site's CDN, and the proxy
-    already caps and caches what it holds."""
-    for item in payload.get("items") or ():
-        item["poster"] = proxy_url(item.get("poster"))
-    return payload
-
-
 def latest(src, limit=24, page=1):
     src = norm(src)
     if src == MOVIBOX:
-        return _proxy_list(movibox.latest(limit, page))
+        return movibox.latest(limit, page)
     if src == JAROCKS:
-        return _proxy_list(jarocks.latest(limit, page))
+        return jarocks.latest(limit, page)
     return _nkiri_latest(limit, page)
 
 
@@ -113,10 +102,10 @@ def browse(src, slug="", cat="", limit=24, page=1):
     src = norm(src)
     if src == MOVIBOX:
         # movibox has one axis too: slug is one of its home rows
-        return _proxy_list(movibox.browse(slug, limit, page))
+        return movibox.browse(slug, limit, page)
     if src == JAROCKS:
         # jarocks has one axis: slug is a category
-        return _proxy_list(jarocks.browse(slug, limit, page))
+        return jarocks.browse(slug, limit, page)
     return _nkiri_browse(slug, cat, limit, page)
 
 
@@ -125,9 +114,9 @@ def search(src, query, limit=24, page=1):
     if not (query or "").strip():
         return page_payload([], page, limit, 0, 0)
     if src == MOVIBOX:
-        return _proxy_list(movibox.search(query, limit, page))
+        return movibox.search(query, limit, page)
     if src == JAROCKS:
-        return _proxy_list(jarocks.search(query, limit, page))
+        return jarocks.search(query, limit, page)
     return search_results(query, limit, page)
 
 
@@ -143,7 +132,8 @@ def parse_ref(src, ref):
 
 
 def post(src, ref):
-    """Detail view model, posters already pointed at the local proxy."""
+    """Detail view model. Posters are upstream URLs: turning one into a
+    same-origin /api/img link is the web layer's job, not the engine's."""
     src = norm(src)
     if src == MOVIBOX:
         view = movibox.post_view(ref)
@@ -153,7 +143,6 @@ def post(src, ref):
         view = parse_post_view(get_post(int(ref)))
         view["genres"] = genre_names(view.pop("tag_ids", []))
         view["formats"] = format_names(view.pop("cat_ids", []))
-    view["poster"] = proxy_url(view.get("poster"))
     # the card/star machinery keys watchlist entries by src, so carry it back
     view["src"] = src
     return view
@@ -225,6 +214,15 @@ def resolve_allowed(url):
         return False
     return (resolve_target_allowed(url) or jarocks.resolve_host_allowed(url)
             or movibox.file_host_allowed(url))
+
+
+def file_referer(url, fallback=None):
+    """The referer a file host demands, or `fallback` for one that wants none.
+
+    A downloader that shells out to curl needs this: the movibox CDN answers
+    429 to a request that arrives without a movibox referer.
+    """
+    return movibox.file_referer(url) or fallback
 
 
 def stream(url, headers=None):

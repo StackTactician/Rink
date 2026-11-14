@@ -129,16 +129,6 @@ _image_bytes = [0]
 _MAX_ENTRY = 3 * 1024 * 1024  # ignore absurd originals
 
 
-def proxy_url(url):
-    """Local /api/img URL for an upstream image, or url unchanged."""
-    if not url:
-        return url
-    host = urllib.parse.urlparse(url).netloc
-    if not _known_image_host(host):
-        return url
-    return "/api/img?u=" + urllib.parse.quote(url, safe="")
-
-
 def image_allowed(url):
     p = urllib.parse.urlparse(url or "")
     return (p.scheme in ("http", "https")

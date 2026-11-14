@@ -14,7 +14,7 @@ import re
 import urllib.parse
 
 from .cache import TTLCache
-from .media import LARGE, media_url, media_urls, proxy_url
+from .media import LARGE, media_url, media_urls
 from .net import api_get, api_get_page
 from .text import clean_title
 
@@ -57,7 +57,7 @@ def _summaries(posts):
         "title": clean_title(p["title"]["rendered"]),
         "url": p["link"],
         "date": p.get("date", "")[:10],
-        "poster": proxy_url(posters.get(p.get("featured_media"))),
+        "poster": posters.get(p.get("featured_media")),
     } for p in posts]
 
 

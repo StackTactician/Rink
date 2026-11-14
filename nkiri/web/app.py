@@ -211,8 +211,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(sources.menu(_src(q)))
 
     def _ep_latest(self, q):
-        self._json(sources.latest(_src(q), _int_param(q, "limit", 24),
-                                  _int_param(q, "page", 1)))
+        self._json(_proxied(sources.latest(_src(q), _int_param(q, "limit", 24),
+                                           _int_param(q, "page", 1))))
 
     def _ep_search(self, q):
         query = _str_param(q, "q")
@@ -220,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         page = _int_param(q, "page", 1)
         if not query.strip():
             return self._json(page_payload([], page, limit, 0, 0))
-        self._json(sources.search(_src(q), query, limit, page))
+        self._json(_proxied(sources.search(_src(q), query, limit, page)))
 
     def _ep_genres(self, q):
         # nkiri-only shape, kept for old clients; /api/menu is the real one
@@ -230,17 +230,19 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"formats": sources.menu(sources.NKIRI)["formats"]})
 
     def _ep_browse(self, q):
-        self._json(sources.browse(_src(q), _str_param(q, "tag"),
-                                  _str_param(q, "cat"),
-                                  _int_param(q, "limit", 24),
-                                  _int_param(q, "page", 1)))
+        self._json(_proxied(sources.browse(_src(q), _str_param(q, "tag"),
+                                           _str_param(q, "cat"),
+                                           _int_param(q, "limit", 24),
+                                           _int_param(q, "page", 1))))
 
     def _ep_post(self, q):
         src = _src(q)
         pid = sources.parse_ref(src, _str_param(q, "id"))
         if not pid:
             return self._json({"error": "not found"}, 404)
-        return self._json(sources.post(src, pid))
+        view = sources.post(src, pid)
+        view["poster"] = _proxy_poster(view.get("poster"))
+        return self._json(view)
 
     def _ep_size(self, q):
         """File size for one download link, when the source knows it cheaply."""
@@ -327,6 +329,25 @@ class Handler(BaseHTTPRequestHandler):
     def _ep_health(self, q):
         """Liveness only. The health check must not do the index route's work."""
         self._send(200, "ok", "text/plain; charset=utf-8", etag=False)
+
+def _proxy_poster(url):
+    """A same-origin /api/img link for an upstream poster.
+
+    The engine hands out the real URL; only this interface rewrites it. That
+    keeps the phone off the other sites' CDNs without teaching the core what
+    a web path looks like.
+    """
+    if not url or not image_allowed(url):
+        return url
+    return "/api/img?u=" + urllib.parse.quote(url, safe="")
+
+
+def _proxied(payload):
+    """Point every card's poster at the local image proxy."""
+    for item in payload.get("items") or ():
+        item["poster"] = _proxy_poster(item.get("poster"))
+    return payload
+
 
 def _disposition(name):
     """attachment header, ASCII-safe for old clients + RFC 5987 for the rest."""

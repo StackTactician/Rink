@@ -57,6 +57,17 @@ function setSource(id){
   loadMenu();           // each site brings its own menu, not a sliced one
   return true;
 }
+/* The toggle is built from SOURCES, not written into the page: a source that
+   exists in the list is a button, and adding one is a one-line change. */
+function buildSourceButtons(){
+  sourcesEl.innerHTML="";
+  SOURCES.forEach(s=>{
+    const b=document.createElement("button");
+    b.type="button";b.dataset.src=s.id;b.textContent=s.label;
+    sourcesEl.appendChild(b);
+  });
+}
+
 function paintSource(){
   sourcesEl.querySelectorAll("button").forEach(b => {
     const on = b.dataset.src === source;
@@ -776,6 +787,7 @@ searchBox.addEventListener("input",()=>{
 /* Paint the list first, fill the chip row when the menu lands. Awaiting the
    menu here serialised two round trips in front of the first card.
    renderChips() is a no-op on an empty catalog and runs again on arrival. */
+buildSourceButtons();
 paintSource();
 route();
 loadMenu();
