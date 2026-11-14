@@ -131,9 +131,15 @@ def post_form(url, fields, referer=None, timeout=FORM_TIMEOUT):
         raise FetchError(str(e)) from e
 
 
-def open_stream(url, timeout=STREAM_TIMEOUT):
-    """Open a text/file URL for chunked reading. Caller closes."""
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+def open_stream(url, timeout=STREAM_TIMEOUT, headers=None):
+    """Open a text/file URL for chunked reading. Caller closes.
+
+    `headers` carries what a host demands before it serves bytes — a referer
+    for movibox's CDN, a Range for a seek in the player.
+    """
+    hdrs = {"User-Agent": UA}
+    hdrs.update(headers or {})
+    req = urllib.request.Request(url, headers=hdrs)
     try:
         return urllib.request.urlopen(req, timeout=timeout)
     except Exception as e:

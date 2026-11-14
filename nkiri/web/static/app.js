@@ -17,11 +17,13 @@ const sourcesEl = $("#sources");
    a shared link keeps it, and in localStorage so the next visit opens on the
    one that was picked. Every API call carries ?src= because post ids collide
    between the two sites. */
-const SOURCES = [{id: "nkiri", label: "Nkiri"}, {id: "9ja", label: "9jarocks"}];
+const SOURCES = [{id: "nkiri", label: "Nkiri"}, {id: "9ja", label: "9jarocks"},
+                 {id: "movibox", label: "MoviBox"}];
 const DEFAULT_SOURCE = "nkiri";
 /* both sites can answer, but 9jarocks answers per file (one GET per episode
-   row), so it is the slower of the two on a long season */
-const CAN_SIZE = {nkiri: true, "9ja": true};
+   row), so it is the slower of the two on a long season. movibox needs no
+   lookup at all: its sizes arrive with the links. */
+const CAN_SIZE = {nkiri: true, "9ja": true, movibox: false};
 const SOURCE_KEY = "rink.src";
 let source = DEFAULT_SOURCE;
 
@@ -424,6 +426,9 @@ function qualityOf(lk){
    null for a film or a flat file list, so the caller keeps the old layout. */
 function seasonGroups(links){
   const parsed=links.map(lk=>{
+    /* a source that knows its own season/episode says so outright; the rest
+       are read out of the filename, which is all their links carry */
+    if(lk.season!=null&&lk.episode!=null)return {season:+lk.season,episode:+lk.episode};
     let u="";
     try{u=decodeURIComponent(lk.url||"");}catch(e){u=lk.url||"";}
     const m=u.match(/S(\d{1,2})E(\d{1,3})/i);
@@ -530,7 +535,21 @@ async function detail(id){
       if(lk.size)sz.textContent=lk.size;
       else sizeEls.set(lk.url,sz);
       btn.onclick=()=>startDl(lk,btn,lab,status);
-      row.appendChild(info);row.appendChild(btn);list.appendChild(row);
+      // a source that streams gets a second button: the file opens in its own
+      // tab and the browser's own player takes it from there
+      if(lk.play){
+        const play=document.createElement("button");
+        play.className="btn btn-play";play.textContent="Play";
+        play.onclick=()=>{
+          const u=apiUrl("/api/stream?url="+encodeURIComponent(lk.url)
+                        +"&name="+encodeURIComponent(lk.name||"video.mp4"));
+          window.open(u,"_blank","noopener");
+        };
+        row.appendChild(info);row.appendChild(play);row.appendChild(btn);
+      }else{
+        row.appendChild(info);row.appendChild(btn);
+      }
+      list.appendChild(row);
     });
     return list;
   }
@@ -631,8 +650,11 @@ async function detail(id){
       //    The request stays same-origin (our /api/file proxy) so the browser
       //    saves it as an attachment and streams straight to disk: no blob,
       //    no memory copy, no in-page progress loop.
+      /* the link's own name is the readable one ("Title S01E02 1080p.mp4");
+         a resolver that only knows the URL falls back to its basename */
+      const fname=lk.name||j.name||"download";
       handToBrowser(apiUrl("/api/file?url="+encodeURIComponent(j.direct)
-                          +"&name="+encodeURIComponent(j.name)),j.name);
+                          +"&name="+encodeURIComponent(fname)),fname);
 
       lab.textContent="Downloading...";
       txt.textContent=(j.size?humanSize(j.size)+" - ":"")+"saving to your device";

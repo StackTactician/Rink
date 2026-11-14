@@ -319,6 +319,11 @@ button.dl-head:active{filter:brightness(1.5)}
   opacity:.72;white-space:nowrap;
 }
 .dl-size:empty{display:none}
+/* a streaming row carries two actions: play opens a tab, download saves */
+.btn-play{
+  background:transparent;color:var(--acc);border:2px solid var(--acc);
+  letter-spacing:.1em;
+}
 .btn-ghost{background:transparent;color:var(--txt);border:2px solid var(--line-hi)}
 .back{
   display:inline-block;margin-bottom:16px;

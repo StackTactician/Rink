@@ -3,10 +3,11 @@
 Everything the web layer and the CLI ask for goes through here, so a new site
 means one module and one entry in SOURCES — no endpoint changes.
 
-Two sources exist today:
+Three sources exist today:
 
   nkiri     thenkiri.com    1080p MKV on downloadwella, 2-step resolve
   9ja       9jarocks.net    540p x265 MKV on loadedfiles, 3-hop token chain
+  movibox   movibox.net     signed MP4 on hakunaymatata, no chain at all
 
 Post ids are per-site and can collide, so every id and every cache key that
 carries one is namespaced by source upstream of this module.
@@ -16,7 +17,7 @@ import ipaddress
 import logging
 import urllib.parse
 
-from . import jarocks
+from . import jarocks, movibox
 from .catalog import browse as _nkiri_browse
 from .config import BASE
 from .catalog import format_names, formats, genre_names, genres, public
@@ -24,6 +25,7 @@ from .content import parse_post_view
 from .download import (direct_url_allowed, landing_size, resolve_info,
                        resolve_target_allowed)
 from .media import proxy_url
+from .net import open_stream
 from .posts import get_post, latest as _nkiri_latest, page_payload
 from .posts import search_results
 from .refs import parse_ref as _nkiri_ref
@@ -32,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 NKIRI = "nkiri"
 JAROCKS = "9ja"
+MOVIBOX = "movibox"
 DEFAULT = NKIRI
 
 #: ordered: the toggle renders in this order
@@ -39,6 +42,8 @@ SOURCES = (
     (NKIRI, {"label": "Nkiri", "site": "https://thenkiri.com",
              "kind": "genre"}),
     (JAROCKS, {"label": "9jarocks", "site": "https://9jarocks.net",
+               "kind": "category"}),
+    (MOVIBOX, {"label": "MoviBox", "site": "https://movibox.net",
                "kind": "category"}),
 )
 _IDS = tuple(src for src, _meta in SOURCES)
@@ -49,6 +54,8 @@ def norm(src):
     src = (src or "").strip().lower()
     if src in ("jarocks", "9jarocks"):
         return JAROCKS
+    if src in ("movi", "movibox.net"):
+        return MOVIBOX
     return src if src in _IDS else DEFAULT
 
 
@@ -71,6 +78,9 @@ def menu(src):
     jarocks only has real categories, and those are the chips.
     """
     src = norm(src)
+    if src == MOVIBOX:
+        return {"id": src, "kind": "category", "chips": movibox.menu(),
+                "formats": []}
     if src == JAROCKS:
         return {"id": src, "kind": "category",
                 "chips": [{k: c[k] for k in ("slug", "name", "count")}
@@ -92,6 +102,8 @@ def _proxy_list(payload):
 
 def latest(src, limit=24, page=1):
     src = norm(src)
+    if src == MOVIBOX:
+        return _proxy_list(movibox.latest(limit, page))
     if src == JAROCKS:
         return _proxy_list(jarocks.latest(limit, page))
     return _nkiri_latest(limit, page)
@@ -99,6 +111,9 @@ def latest(src, limit=24, page=1):
 
 def browse(src, slug="", cat="", limit=24, page=1):
     src = norm(src)
+    if src == MOVIBOX:
+        # movibox has one axis too: slug is one of its home rows
+        return _proxy_list(movibox.browse(slug, limit, page))
     if src == JAROCKS:
         # jarocks has one axis: slug is a category
         return _proxy_list(jarocks.browse(slug, limit, page))
@@ -109,6 +124,8 @@ def search(src, query, limit=24, page=1):
     src = norm(src)
     if not (query or "").strip():
         return page_payload([], page, limit, 0, 0)
+    if src == MOVIBOX:
+        return _proxy_list(movibox.search(query, limit, page))
     if src == JAROCKS:
         return _proxy_list(jarocks.search(query, limit, page))
     return search_results(query, limit, page)
@@ -118,6 +135,8 @@ def search(src, query, limit=24, page=1):
 
 def parse_ref(src, ref):
     src = norm(src)
+    if src == MOVIBOX:
+        return movibox.parse_ref(ref)
     if src == JAROCKS:
         return jarocks.parse_ref(ref)
     return _nkiri_ref(ref)
@@ -126,7 +145,9 @@ def parse_ref(src, ref):
 def post(src, ref):
     """Detail view model, posters already pointed at the local proxy."""
     src = norm(src)
-    if src == JAROCKS:
+    if src == MOVIBOX:
+        view = movibox.post_view(ref)
+    elif src == JAROCKS:
         view = jarocks.post_view(int(ref))
     else:
         view = parse_post_view(get_post(int(ref)))
@@ -144,6 +165,8 @@ def resolve(url, referer=None):
     """Resolve a download link from either site. The host decides, so a link
     pasted from the wrong tab still works."""
     host = urllib.parse.urlparse(url or "").hostname or ""
+    if movibox.file_host_allowed(url):
+        return movibox.resolve_info(url)
     if jarocks.resolve_host_allowed(url) or jarocks.file_host_allowed(url):
         return jarocks.resolve_info(url)
     if not host:
@@ -160,6 +183,9 @@ def size(src, url):
     page opened from the watchlist — still gets the size it asked for instead
     of an empty answer from the wrong resolver.
     """
+    if movibox.file_host_allowed(url):
+        # the size came with the link; a movibox file page has nothing to add
+        return {"size": None, "bytes": None}
     lookups = ((jarocks.size_info, landing_size)
                if jarocks.resolve_host_allowed(url)
                else (landing_size, jarocks.size_info))
@@ -189,15 +215,32 @@ def file_allowed(url):
     p = urllib.parse.urlparse(url or "")
     if p.scheme not in ("http", "https") or not _public_host(p.hostname or ""):
         return False
-    return direct_url_allowed(url) or jarocks.file_host_allowed(url)
+    return (direct_url_allowed(url) or jarocks.file_host_allowed(url)
+            or movibox.file_host_allowed(url))
 
 
 def resolve_allowed(url):
     p = urllib.parse.urlparse(url or "")
     if p.scheme not in ("http", "https") or not _public_host(p.hostname or ""):
         return False
-    return resolve_target_allowed(url) or jarocks.resolve_host_allowed(url)
+    return (resolve_target_allowed(url) or jarocks.resolve_host_allowed(url)
+            or movibox.file_host_allowed(url))
+
+
+def stream(url, headers=None):
+    """Open a direct file for proxying, with whatever its host insists on.
+
+    movibox's CDN answers 429 to a request that arrives without a movibox
+    referer, so the referer travels with the stream rather than with the
+    browser — the phone never talks to the CDN itself.
+    """
+    extra = dict(headers or {})
+    referer = movibox.file_referer(url)
+    if referer:
+        extra.setdefault("Referer", referer)
+    return open_stream(url, headers=extra)
 
 
 def clear_cache():
     jarocks.clear_cache()
+    movibox.clear_cache()

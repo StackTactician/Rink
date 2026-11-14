@@ -15,7 +15,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import sources
 from ..media import fetch_image, image_allowed
-from ..net import open_stream
 from ..posts import page_payload
 from ..text import human_size
 
@@ -117,18 +116,35 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------- download
 
-    def _stream_file(self, direct, name):
-        """Proxy a direct file URL so the browser fetch stays same-origin."""
+    def _stream_file(self, direct, name, range_header=None, inline=False):
+        """Proxy a direct file URL so the browser fetch stays same-origin.
+
+        `range_header` is forwarded verbatim and the upstream status is passed
+        back, so a media element can seek: it asks for a byte window and gets
+        a 206 with its own Content-Range. Without it the whole file is sent,
+        which is what a download wants.
+        """
+        extra = {"Range": range_header} if range_header else None
         try:
-            with open_stream(direct) as r:
-                ctype = r.headers.get("Content-Type") or "application/octet-stream"
+            with sources.stream(direct, extra) as r:
+                status = getattr(r, "status", 200) or 200
+                ctype = (r.headers.get("Content-Type")
+                         or ("video/mp4" if inline else "application/octet-stream"))
                 clen = r.headers.get("Content-Length")
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Type", ctype)
                 if clen:
                     self.send_header("Content-Length", clen)
-                self.send_header("Content-Disposition",
-                                 _disposition(name))
+                content_range = r.headers.get("Content-Range")
+                if content_range:
+                    self.send_header("Content-Range", content_range)
+                if inline:
+                    # a media element sits in a tab of its own: no attachment,
+                    # and seek support advertised
+                    self.send_header("Accept-Ranges", "bytes")
+                else:
+                    self.send_header("Content-Disposition",
+                                     _disposition(name))
                 self.send_header("Access-Control-Allow-Origin", "*")
                 if not clen:
                     # unknown length: HTTP/1.1 cannot delimit it, so close after
@@ -257,6 +273,26 @@ class Handler(BaseHTTPRequestHandler):
         logger.info("STREAM request name=%s", name)
         return self._stream_file(direct, name)
 
+    def _ep_stream(self, q):
+        """Play a file in the browser's own media player.
+
+        The tab opens on this URL, so the response is inline video with Range
+        passed through: the phone's player can seek without downloading the
+        whole file first, and the CDN's referer requirement is met here rather
+        than by the browser.
+        """
+        direct = _str_param(q, "url")
+        name = _str_param(q, "name", "video.mp4")
+        if not direct:
+            return self._json({"error": "missing url"}, 400)
+        if not sources.file_allowed(direct):
+            logger.warning("PLAY refused (not a direct file url): %s", direct)
+            return self._json({"error": "url not allowed"}, 400)
+        logger.info("PLAY request name=%s", name)
+        return self._stream_file(direct, name,
+                                 range_header=self.headers.get("Range"),
+                                 inline=True)
+
     def _ep_img(self, q):
         """Same-origin poster proxy: the phone never talks to the CDN itself."""
         url = _str_param(q, "u")
@@ -335,13 +371,14 @@ ROUTES = {
     "/api/resolve": Handler._ep_resolve,
     "/api/size": Handler._ep_size,
     "/api/file": Handler._ep_file,
+    "/api/stream": Handler._ep_stream,
     "/api/img": Handler._ep_img,
 }
 
 
 def warm_cache(limit=24):
     """Prefetch the landing page so the first browser hit is already cached."""
-    for src in (sources.NKIRI, sources.JAROCKS):
+    for src in (sources.NKIRI, sources.JAROCKS, sources.MOVIBOX):
         try:
             sources.latest(src, limit)
             # the chip row needs these before the first paint, not after it

@@ -114,6 +114,15 @@ def clear_cache():
 IMAGE_HOSTS = frozenset({"thenkiri.com", "www.thenkiri.com",
                          "9jarocks.net", "www.9jarocks.net"})
 
+#: a source whose artwork lives on a family of CDN subdomains: movibox serves
+#: covers from pbcdn / pbcdnw / h5-static, and the exact host changes per image
+IMAGE_HOST_SUFFIXES = (".aoneroom.com",)
+
+
+def _known_image_host(host):
+    host = (host or "").lower()
+    return host in IMAGE_HOSTS or host.endswith(IMAGE_HOST_SUFFIXES)
+
 _MAX_IMAGE_BYTES = 40 * 1024 * 1024
 _images = OrderedDict()       # url -> (bytes, ctype), LRU
 _image_bytes = [0]
@@ -125,14 +134,15 @@ def proxy_url(url):
     if not url:
         return url
     host = urllib.parse.urlparse(url).netloc
-    if host not in IMAGE_HOSTS:
+    if not _known_image_host(host):
         return url
     return "/api/img?u=" + urllib.parse.quote(url, safe="")
 
 
 def image_allowed(url):
     p = urllib.parse.urlparse(url or "")
-    return p.scheme in ("http", "https") and p.netloc in IMAGE_HOSTS
+    return (p.scheme in ("http", "https")
+            and _known_image_host(p.netloc.split(":")[0]))
 
 
 def fetch_image(url):
