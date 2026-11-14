@@ -52,8 +52,8 @@ class SectionTest(unittest.TestCase):
     """The home rows are the taxonomy, because there is no genre endpoint."""
 
     def setUp(self):
-        self._saved = movibox._home
-        movibox._home = lambda: {"operatingList": [
+        self._saved = movibox.listing._home
+        movibox.listing._home = lambda: {"operatingList": [
             {"type": "BANNER", "title": "Banner_Africa", "opId": "1",
              "subjects": [{"subjectType": 1, "detailPath": "b-1"}]},
             {"type": "SUBJECTS_MOVIE", "title": "Popular Series", "opId": "42",
@@ -66,7 +66,7 @@ class SectionTest(unittest.TestCase):
         ]}
 
     def tearDown(self):
-        movibox._home = self._saved
+        movibox.listing._home = self._saved
 
     def test_only_subject_rows_become_chips(self):
         chips = movibox.menu()
@@ -113,14 +113,14 @@ class EnumerateTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self._saved = movibox._search_page
-        self._saved_cap = movibox._MAX_PAGES
-        movibox._enum_cache.clear()
+        self._saved = movibox.listing._search_page
+        self._saved_cap = movibox.config._MAX_PAGES
+        movibox.state._enum_cache.clear()
 
     def tearDown(self):
-        movibox._search_page = self._saved
-        movibox._MAX_PAGES = self._saved_cap
-        movibox._enum_cache.clear()
+        movibox.listing._search_page = self._saved
+        movibox.config._MAX_PAGES = self._saved_cap
+        movibox.state._enum_cache.clear()
 
     def _pages(self, pages):
         """Serve a fixed page -> (items, has_more, hint) map."""
@@ -132,20 +132,20 @@ class EnumerateTest(unittest.TestCase):
         return {"id": pid}
 
     def test_one_page_needs_no_more_requests(self):
-        movibox._search_page = self._pages(
+        movibox.listing._search_page = self._pages(
             {1: ([self._item("a"), self._item("b")], False, 2)})
         items, complete = movibox._enumerate("x")
         self.assertEqual([i["id"] for i in items], ["a", "b"])
         self.assertTrue(complete)
 
     def test_a_season_repeat_is_one_card(self):
-        movibox._search_page = self._pages(
+        movibox.listing._search_page = self._pages(
             {1: ([self._item("a"), self._item("a")], False, 2)})
         items, _ = movibox._enumerate("x")
         self.assertEqual([i["id"] for i in items], ["a"])
 
     def test_every_page_is_read_and_the_count_is_exact(self):
-        movibox._search_page = self._pages({
+        movibox.listing._search_page = self._pages({
             1: ([self._item("a"), self._item("b")], True, 8),
             2: ([self._item("c")], True, 8),
             3: ([self._item("d")], False, 8),
@@ -155,18 +155,18 @@ class EnumerateTest(unittest.TestCase):
         self.assertTrue(complete)
 
     def test_a_read_that_hits_the_cap_says_it_is_a_lower_bound(self):
-        movibox._MAX_PAGES = 3
+        movibox.config._MAX_PAGES = 3
 
         def fake(query, page):
             return [self._item(f"p{page}")], True, 900
-        movibox._search_page = fake
+        movibox.listing._search_page = fake
         items, complete = movibox._enumerate("x")
         self.assertEqual(len(items), 3)
         self.assertFalse(complete)
 
     def test_an_early_page_does_not_end_the_read(self):
         """hasMore belongs to the last page of a wave, not to any of them."""
-        movibox._search_page = self._pages({
+        movibox.listing._search_page = self._pages({
             1: ([self._item("a")], True, 4),
             2: ([self._item("b")], True, 4),
             3: ([], False, 4),
@@ -185,13 +185,13 @@ class FilesTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self._saved = movibox._api
+        self._saved = movibox.api._api
         self.calls = []
-        movibox._files_cache.clear()
+        movibox.state._files_cache.clear()
 
     def tearDown(self):
-        movibox._api = self._saved
-        movibox._files_cache.clear()
+        movibox.api._api = self._saved
+        movibox.state._files_cache.clear()
 
     def _fake(self, play_rows, download_rows):
         def api(path, referer=None, body=None):
@@ -203,7 +203,7 @@ class FilesTest(unittest.TestCase):
         return api
 
     def test_play_supplies_every_quality(self):
-        movibox._api = self._fake(
+        movibox.api._api = self._fake(
             [{"resolutions": "1080", "url": "https://cdn/x1080.mp4", "size": "900"},
              {"resolutions": "360", "url": "https://cdn/x360.mp4", "size": "300"}], [])
         files = movibox._files("1", "a-b", 1, 1)
@@ -212,14 +212,14 @@ class FilesTest(unittest.TestCase):
 
     def test_download_is_the_fallback(self):
         """A title that publishes no streams still gets its files."""
-        movibox._api = self._fake(
+        movibox.api._api = self._fake(
             [], [{"resolution": 480, "url": "https://cdn/x.mp4", "size": "400"}])
         files = movibox._files("1", "a-b", 1, 1)
         self.assertEqual([f["resolution"] for f in files], [480])
         self.assertEqual(self.calls, ["play", "download"])
 
     def test_a_locked_row_without_a_url_is_not_a_link(self):
-        movibox._api = self._fake(
+        movibox.api._api = self._fake(
             [{"resolutions": "1080", "url": "", "size": "900", "vipLocked": True}], [])
         self.assertEqual(movibox._files("1", "a-b", 1, 1), [])
 
