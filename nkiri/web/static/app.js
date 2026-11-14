@@ -433,6 +433,13 @@ function qualityOf(lk){
   return m?m[1]:"";
 }
 
+/* The quality a row offers. A source that states it outright wins; the rest
+   are read out of the filename, which is all their links carry. */
+function qualityLabel(lk){
+  if(lk&&lk.resolution)return lk.resolution+"p";
+  return qualityOf(lk)||"";
+}
+
 /* Group an episode list by season when every link carries SxxExx. Returns
    null for a film or a flat file list, so the caller keeps the old layout. */
 function seasonGroups(links){
@@ -505,7 +512,7 @@ async function detail(id){
   const bits=[];const k=kind(p.title);if(k)bits.push(k);
   const yr=yearOf(p.title);if(yr)bits.push(yr);
   (p.formats||[]).forEach(f=>bits.push(f.name));
-  const qual=qualityOf(p.links[0]);if(qual)bits.push(qual);
+  const qual=qualityLabel(p.links[0]);if(qual)bits.push(qual);
   sub.textContent=bits.join(" / ");col.appendChild(sub);
 
   if(p.date){const added=document.createElement("div");added.className="d-added";
@@ -560,15 +567,17 @@ async function detail(id){
       l.textContent=(g.links[0].label||g.links[0].text||"File").split(" · ")[0];
       info.appendChild(l);
 
+      // the quality menu sits on every row that knows its quality, even when
+      // there is only one, so a season reads the same top to bottom. The size
+      // stays on the download button: the menu says which file, not how big
       let pick=null;
-      if(g.links.length>1){
+      if(g.links.some(lk=>qualityLabel(lk))){
         pick=document.createElement("select");pick.className="dl-q";
         pick.setAttribute("aria-label","quality");
         g.links.forEach((lk,i)=>{
           const o=document.createElement("option");
           o.value=String(i);
-          o.textContent=(lk.resolution?lk.resolution+"p":"Option "+(i+1))
-                        +(lk.size?"  ·  "+lk.size:"");
+          o.textContent=qualityLabel(lk)||"File";
           pick.appendChild(o);
         });
         info.appendChild(pick);
@@ -623,7 +632,10 @@ async function detail(id){
       name.textContent="Season "+grp.season;
       const count=document.createElement("span");
       count.className="dl-count";
-      count.textContent=grp.links.length+(grp.links.length===1?" episode":" episodes");
+      // a season holds episodes, not files: three qualities of one episode
+      // are still one episode
+      const eps=new Set(grp.links.map(lk=>lk.episode!=null?lk.episode:lk.url));
+      count.textContent=eps.size+(eps.size===1?" episode":" episodes");
       h.appendChild(caret);h.appendChild(name);h.appendChild(count);
       const body=document.createElement("div");body.className="dl-body";
       body.appendChild(linkList(grp.links));
