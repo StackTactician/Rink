@@ -6,6 +6,7 @@ import re
 import urllib.parse
 
 from ...errors import RinkError
+from ...images import https_only
 from ...page import page_payload
 from ...text import clean_title
 from . import state
@@ -27,13 +28,8 @@ _ARIA_RE = re.compile(r'aria-label="([^"]*)"')
 _WP_THUMB_SUFFIX_RE = re.compile(r"-\d+x\d+(?=\.[A-Za-z]{2,4}$)")
 
 
-def _https(url):
-    """The site still prints http:// on older uploads; its own host serves
-    https, and the image proxy only carries https, so a bare http image would
-    be dropped and the card left with a placeholder."""
-    if (url or "").startswith("http://"):
-        return "https://" + url[len("http://"):]
-    return url
+#: the scheme rule is the shared one; this alias keeps the parser readable
+_https = https_only
 
 
 def _full_poster(url):

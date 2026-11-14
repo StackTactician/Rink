@@ -14,7 +14,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import sources
-from ..images import fetch_image, image_allowed
+from ..images import fetch_image, https_only, image_allowed
 from ..page import page_payload
 from ..text import human_size
 
@@ -348,6 +348,7 @@ def _proxy_poster(url):
     keeps the phone off the other sites' CDNs without teaching the core what
     a web path looks like.
     """
+    url = https_only(url)
     if not url or not image_allowed(url):
         return url
     return "/api/img?u=" + urllib.parse.quote(url, safe="")

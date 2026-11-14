@@ -21,17 +21,32 @@ logger = logging.getLogger(__name__)
 
 #: hosts whose images we will fetch on the browser's behalf, taken from the
 #: sources themselves: a new source declares its hosts in its META and this
-#: list follows, so the proxy cannot fall behind the catalogue
+#: list follows. Built on first use, because the sources import this module.
+_HOSTS = None
+
+
 def _hosts():
-    from .sources import SOURCES
-    exact, suffixes = set(), set()
-    for _src, meta in SOURCES:
-        for host in meta.get("image_hosts", ()):
-            (suffixes if host.startswith(".") else exact).add(host)
-    return frozenset(exact), tuple(sorted(suffixes))
+    """(exact hosts, CDN suffixes), read from every registered source."""
+    global _HOSTS
+    if _HOSTS is None:
+        from .sources import SOURCES
+        exact, suffixes = set(), set()
+        for _src, meta in SOURCES:
+            for host in meta.get("image_hosts", ()):
+                (suffixes if host.startswith(".") else exact).add(host)
+        _HOSTS = (frozenset(exact), tuple(sorted(suffixes)))
+    return _HOSTS
 
 
-IMAGE_HOSTS, IMAGE_HOST_SUFFIXES = _hosts()
+def __getattr__(name):
+    """IMAGE_HOSTS / IMAGE_HOST_SUFFIXES on demand, so importing this module
+    early cannot deadlock against the sources that import it back."""
+    if name == "IMAGE_HOSTS":
+        return _hosts()[0]
+    if name == "IMAGE_HOST_SUFFIXES":
+        return _hosts()[1]
+    raise AttributeError(name)
+
 
 _MAX_IMAGE_BYTES = 40 * 1024 * 1024
 _images = OrderedDict()       # url -> (bytes, ctype), LRU
@@ -40,9 +55,25 @@ _MAX_ENTRY = 3 * 1024 * 1024  # ignore absurd originals
 _lock = threading.Lock()
 
 
+def https_only(url):
+    """Upgrade an http image URL on a host we already proxy.
+
+    Older uploads still carry http:// in their markup. The proxy speaks both,
+    but a browser on an https page treats a plain-http subresource as mixed
+    content and refuses it, so the scheme is settled here once rather than in
+    every parser that reads a poster.
+    """
+    if (url or "").startswith("http://"):
+        host = urllib.parse.urlparse(url).hostname or ""
+        if _known_image_host(host):
+            return "https://" + url[len("http://"):]
+    return url
+
+
 def _known_image_host(host):
     host = (host or "").lower()
-    return host in IMAGE_HOSTS or host.endswith(IMAGE_HOST_SUFFIXES)
+    exact, suffixes = _hosts()
+    return host in exact or host.endswith(suffixes)
 
 
 def image_allowed(url):

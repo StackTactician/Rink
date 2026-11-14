@@ -125,10 +125,6 @@ def clear_cache():
         _image_bytes.clear()
 
 
-IMAGE_HOSTS = frozenset({"thenkiri.com", "www.thenkiri.com",
-                         "9jarocks.net", "www.9jarocks.net"})
-
-
 IMAGE_HOST_SUFFIXES = (".aoneroom.com",)
 
 
