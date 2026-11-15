@@ -142,12 +142,13 @@ def browse(slug="", limit=24, page=1, cat=""):
     site's first axis is called a tag.
     """
     tag = slug
+    # the unfiltered page is the newest uploads, which `latest` already owns
+    # and caches; answering it here would fetch and hold the same page twice
+    if not tag and not cat:
+        return latest(limit, page)
     key = (tag, cat, limit, page)
 
     def fetch():
-        if not tag and not cat:
-            return latest(limit, page)
-
         params = [f"per_page={limit}", f"page={page}",
                   f"_fields={_FIELDS}", "orderby=date"]
         if tag:

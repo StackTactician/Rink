@@ -108,11 +108,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _static(self, name, ctype):
         path = os.path.join(STATIC_DIR, name)
-        if not os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
             self._send(404, "not found", "text/plain")
             return
-        with open(path, "rb") as f:
-            self._send(200, f.read(), ctype, cache="public, max-age=3600")
+        # a stand-in host serves /fonts/ itself, but one that serves the app
+        # from here gets a font that stays cached for a year: it never changes
+        cache = _IMMUTABLE if name.startswith("fonts/") else "public, max-age=3600"
+        self._send(200, data, ctype, cache=cache)
 
     # ------------------------------------------------------------- download
 
@@ -205,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
             if route is not None:
                 return route(self, q)
             if path.startswith("/fonts/") and path.count("/") == 2:
-                return self._static(os.path.join("fonts", path[7:]), "font/woff")
+                return self._static("fonts/" + path[7:], "font/woff")
             self._send(404, "not found", "text/plain")
         except Exception as e:
             logger.exception("GET %s failed", self.path)
@@ -365,6 +370,9 @@ def _proxied(payload):
     return payload
 
 
+#: for a file whose name carries its version: a font, or a ?v= asset URL
+_IMMUTABLE = "public, max-age=604800, immutable"
+
 #: what a browser will actually play, by extension. A CDN that answers
 #: application/octet-stream would otherwise land in the download manager.
 _VIDEO_TYPES = {
@@ -429,8 +437,14 @@ ROUTES = {
 
 
 def warm_cache(limit=24):
-    """Prefetch the landing page so the first browser hit is already cached."""
-    for src in (sources.NKIRI, sources.JAROCKS, sources.MOVIBOX):
+    """Prefetch the landing page so the first browser hit is already cached.
+
+    One thread per source, started together: warmed one after another, the
+    last one's feed — movibox, whose `/home` is 579 KB — landed six seconds
+    after the process was listening, so whoever opened the page first paid for
+    it. Nothing is shared between the threads but the caches, which lock.
+    """
+    def warm(src):
         try:
             sources.latest(src, limit)
             # the chip row needs these before the first paint, not after it
@@ -439,6 +453,14 @@ def warm_cache(limit=24):
                         src, len(chips["chips"]), len(chips["formats"]))
         except Exception as e:
             logger.warning("WARM %s failed: %s", src, e)
+
+    threads = [threading.Thread(target=warm, args=(src,), daemon=True, name=src)
+               for src in (m.META["id"] for m in sources._MODULES)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        # bounded: a site that never answers must not pin a warm thread
+        t.join(timeout=60)
 
 
 def main(argv=None):

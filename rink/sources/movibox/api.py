@@ -1,11 +1,22 @@
-"""The private JSON API: its clock token, its JWT, and one request."""
+"""The private JSON API: its clock token, its JWT, and one request.
+
+Requests share a pooled connection per thread, the way nkiri's REST calls do.
+The API answers a 579 KB `/home` in about 2.4 s on a fresh TLS handshake and
+in about 0.3 s on a socket that is already open, so a page that makes several
+calls — one per episode — pays the handshake once instead of once per call.
+
+Requests also opt out of transfer encoding (`Accept-Encoding: identity`).
+Ask for gzip and the API answers chunked, and on a slow link that stream ends
+with `IncompleteRead` part-way through a 579 KB body.
+"""
 
 import hashlib
+import http.client
 import json
 import logging
+import threading
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 
 from ...config import TIMEOUT, UA
 from ...errors import FetchError
@@ -13,6 +24,10 @@ from . import state
 from .config import API, BASE
 
 logger = logging.getLogger(__name__)
+
+_api_host = urllib.parse.urlparse(API).netloc
+_api_prefix = urllib.parse.urlparse(API).path
+_conn = threading.local()
 
 # ------------------------------------------------------------------ plumbing
 
@@ -25,6 +40,7 @@ def _client_token():
 def _headers(token=None, referer=None):
     h = {
         "Accept": "application/json",
+        "Accept-Encoding": "identity",
         "X-Client-Info": json.dumps({"timezone": "Africa/Lagos"}),
         "X-Request-Lang": "en",
         "User-Agent": UA,
@@ -39,21 +55,46 @@ def _headers(token=None, referer=None):
     return h
 
 
+def _opened():
+    conn = getattr(_conn, "conn", None)
+    if conn is None:
+        conn = http.client.HTTPSConnection(_api_host, timeout=TIMEOUT)
+        _conn.conn = conn
+    return conn
+
+
+def _drop():
+    conn = getattr(_conn, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    _conn.conn = None
+
+
 def _raw(path, token=None, referer=None, body=None, timeout=TIMEOUT):
-    """One request. Returns (status, headers, bytes)."""
+    """One request over the pooled socket. Returns (status, headers, bytes).
+
+    A pooled socket can be closed by the server while it idles, so a failure
+    on the first attempt drops it and the call is retried once on a fresh one.
+    """
     data = json.dumps(body).encode() if body is not None else None
     headers = _headers(token, referer)
     if data is not None:
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(API + path, data=data, headers=headers,
-                                 method="POST" if data is not None else "GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+    method = "POST" if data is not None else "GET"
+    for attempt in (1, 2):
+        conn = _opened()
+        try:
+            conn.request(method, _api_prefix + path, body=data, headers=headers)
+            r = conn.getresponse()
             return r.status, r.headers, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers, e.read()
-    except Exception as e:
-        raise FetchError(str(e)) from e
+        except Exception as e:
+            _drop()
+            if attempt == 2:
+                raise FetchError(str(e)) from e
+    raise FetchError(f"unreachable: {path}")
 
 
 def _token_value(force=False):

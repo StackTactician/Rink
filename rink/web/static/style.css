@@ -55,7 +55,9 @@ button{font:inherit;color:inherit}
 }
 .brand{
   flex:0 0 auto;
-  font-size:20px;font-weight:900;letter-spacing:-.02em;
+  /* 700, not 900: the font ships a bold cut and no heavier one, so 900 was
+     drawn with the bold face after a synthesised-weight pass */
+  font-size:20px;font-weight:700;letter-spacing:-.02em;
   text-transform:uppercase;line-height:1;
   padding:4px 2px;
 }

@@ -16,12 +16,15 @@
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Rink">
 <meta name="twitter:description" content="Browse and download movies, series and dramas.">
-<link rel="preconnect" href="https://thenkiri.com" crossorigin>
 <!-- The API is a different origin from this page. Opening the socket and
      finishing TLS here overlaps with parsing app.js instead of stalling the
      first /api call. Harmless when the page is served by the API itself. -->
 <link rel="preconnect" href="https://rink.onrender.com" crossorigin>
-<link rel="stylesheet" href="style.css?v=27">
+<link rel="stylesheet" href="style.css?v=28">
+<!-- The bold cut draws the wordmark in the header, so it is on screen before
+     the stylesheet is even parsed. Finding it late is what made the page
+     re-layout once the font landed. -->
+<link rel="preload" href="fonts/garota-bold.woff" as="font" type="font/woff" crossorigin>
 </head>
 <body>
 <header class="top">
@@ -55,6 +58,6 @@
 </template>
 
 <script src="config.js?v=14"></script>
-<script src="app.js?v=32"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

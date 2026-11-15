@@ -7,6 +7,9 @@ const $ = (s, r = document) => r.querySelector(s);
 const API_BASE = (window.RINK_API
   || new URLSearchParams(location.search).get("api") || "").replace(/\/+$/, "");
 const apiUrl = p => p.startsWith("/api/") ? API_BASE + p : p;
+/* An endpoint that takes ?src, with the source only named when there is one:
+   the seed source (the API's own default) sends no src at all. */
+const srcQuery = (path, id) => path + "?src=" + encodeURIComponent(id || "");
 const view = $("#view");
 const cardTpl = $("#cardTpl");
 const chipsEl = $("#chips");
@@ -23,9 +26,12 @@ const sourcesEl = $("#sources");
    here — and a source that cannot answer a size question says so itself
    instead of being listed in a map that drifts. */
 let SOURCES = [];
-let DEFAULT_SOURCE = "nkiri";
+/* The server names the fallback in /api/sources; boot() replaces this before
+   anything reads it. An id the server lists is the only one the UI can open,
+   so guessing one here would send a request for a site the user cannot see. */
+let DEFAULT_SOURCE = "";
 const SOURCE_KEY = "rink.src";
-let source = DEFAULT_SOURCE;
+let source = "";
 
 /* what this source can do, from the server's own description of it */
 function sourceMeta(id){
@@ -58,7 +64,8 @@ function setSource(id){
   const next = SOURCES.some(x => x.id === id) ? id : DEFAULT_SOURCE;
   if(next === source) return false;
   source = next;
-  try{ localStorage.setItem(SOURCE_KEY, source); }catch(e){}
+  // the seed source has no id to remember: it is "whatever the API defaults to"
+  try{ if(source) localStorage.setItem(SOURCE_KEY, source); }catch(e){}
   paintSource();
   loadMenu();           // each site brings its own menu, not a sliced one
   return true;
@@ -353,7 +360,7 @@ async function browse(tag,page=1){
   view.innerHTML="";
   view.appendChild(spinner());
   try{
-    const res=await getJSON("/api/browse?src="+encodeURIComponent(source)
+    const res=await getJSON(srcQuery("/api/browse", source)
                            +"&tag="+encodeURIComponent(browsing.tag)
                            +"&cat="+encodeURIComponent(browsing.cat)
                            +"&limit=30&page="+page);
@@ -375,7 +382,7 @@ async function search(q,page=1){
   const t=beginRender();
   view.innerHTML=""; view.appendChild(spinner("Searching..."));
   try{
-    const res=await getJSON("/api/search?src="+encodeURIComponent(source)
+    const res=await getJSON(srcQuery("/api/search", source)
                            +"&q="+encodeURIComponent(q)
                            +"&limit=30&page="+page);
     if(stale(t))return;
@@ -474,7 +481,7 @@ async function detail(id){
   const t=beginRender();
   view.innerHTML=""; view.appendChild(spinner("Loading..."));
   let p;
-  try{p=await getJSON("/api/post?src="+encodeURIComponent(source)
+  try{p=await getJSON(srcQuery("/api/post", source)
                      +"&id="+encodeURIComponent(id));}
   catch(e){if(stale(t))return;
     view.innerHTML="";const d=document.createElement("div");d.className="state";
@@ -699,7 +706,7 @@ async function detail(id){
           /* the source has to travel with this one: the endpoint reads the
              size differently per site, and without ?src it answers for the
              default (thenkiri), which knows nothing about a 9jarocks file */
-          const r=await fetch(apiUrl("/api/size?src="+encodeURIComponent(source)
+          const r=await fetch(apiUrl(srcQuery("/api/size", source)
                                      +"&url="+encodeURIComponent(lk.url)));
           const j=await r.json();
           if(stale(token))return;
@@ -727,7 +734,9 @@ async function detail(id){
       //    no memory copy, no in-page progress loop.
       /* the link's own name is the readable one ("Title S01E02 1080p.mp4");
          a resolver that only knows the URL falls back to its basename */
-      const fname=lk.name||j.name||"download";
+      /* a link built from a post's own title can carry a slash, and a slash
+         in Content-Disposition is a path the browser may try to honour */
+      const fname=(lk.name||j.name||"download").replace(/[\/\\:*?"<>|]+/g,"-");
       handToBrowser(apiUrl("/api/file?url="+encodeURIComponent(j.direct)
                           +"&name="+encodeURIComponent(fname)),fname);
 
@@ -764,7 +773,7 @@ function handToBrowser(url,name){
 async function loadMenu(){
   const wanted=source;
   try{
-    const m=await getJSON("/api/menu?src="+encodeURIComponent(wanted));
+    const m=await getJSON(srcQuery("/api/menu", wanted));
     if(wanted!==source)return;    // the toggle moved while this was in flight
     catalog={chips:m.chips||[],formats:m.formats||[],kind:m.kind||"genre"};
   }catch(e){
@@ -864,11 +873,14 @@ async function loadSources(){
       return;
     }
   }catch(e){/* fall through to the seed */}
-  SOURCES = [{id: DEFAULT_SOURCE, label: DEFAULT_SOURCE, can_size: true}];
+  // nothing known about any source: the API's own default answers a request
+  // that names none, so send none rather than inventing an id
+  SOURCES = [{id: "", label: "Site", can_size: true}];
 }
 
 (async function boot(){
   await loadSources();
+  DEFAULT_SOURCE = DEFAULT_SOURCE || SOURCES[0].id;
   buildSourceButtons();
   paintSource();
   route();

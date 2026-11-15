@@ -223,6 +223,27 @@ class FilesTest(unittest.TestCase):
             [{"resolutions": "1080", "url": "", "size": "900", "vipLocked": True}], [])
         self.assertEqual(movibox._files("1", "a-b", 1, 1), [])
 
+    def test_the_files_are_asked_for_by_the_post_module_itself(self):
+        """post.py used to carry a second copy of this function.
+
+        The copy won the import in post.py, so the fix above only ever
+        reached the tests, and the detail page kept asking the wrong way.
+        """
+        movibox.state._files_cache.clear()
+        movibox.api._api = self._fake(
+            [{"resolutions": "1080", "url": "https://cdn/x1080.mp4", "size": "900"}], [])
+        default = {"subject": {"subjectId": "1", "subjectType": 1,
+                               "detailPath": "a-b", "title": "A"},
+                   "resource": {"seasons": [{"se": 0, "maxEp": 0}]}}
+        saved = movibox.post._detail
+        movibox.post._detail = lambda path: default
+        try:
+            view = movibox.post_view("a-b")
+        finally:
+            movibox.post._detail = saved
+        self.assertTrue(view["links"], "the detail page found no files")
+        self.assertEqual(view["links"][0]["url"], "https://cdn/x1080.mp4")
+
 
 class LinkTest(unittest.TestCase):
     def test_a_signed_mp4_is_the_file(self):
@@ -266,6 +287,38 @@ class PlayRouteTest(unittest.TestCase):
 
     def test_the_player_referer_is_a_movies_route(self):
         self.assertTrue(movibox.PLAY_ROUTE.startswith("https://movibox.net/movies/"))
+
+    def test_a_request_without_the_token_asks_for_one(self):
+        """The play gate is the referer *and* the token.
+
+        Without a signed token the API answers `hasResource: false` and an
+        empty stream list, which is what a title with no files looks like, so
+        every request must carry one.
+        """
+        seen = []
+
+        def fake_raw(path, token=None, referer=None, body=None, timeout=None):
+            seen.append((path, token, referer))
+            if path == "/home":
+                return 200, {"x-user": '{"token": "jwt"}'}, b"{}"
+            return 200, {}, b'{"code": 0, "data": {}}'
+
+        saved = movibox.api._raw
+        movibox.api._raw = fake_raw
+        movibox.state._token["value"], movibox.state._token["at"] = None, 0.0
+        try:
+            movibox.api._api("/subject/play?subjectId=1&se=1&ep=1&detailPath=a-b",
+                             referer=movibox.PLAY_ROUTE + "a-b")
+        finally:
+            movibox.api._raw = saved
+            movibox.state._token["value"], movibox.state._token["at"] = None, 0.0
+        play = [s for s in seen if s[0].startswith("/subject/play")][0]
+        self.assertEqual(play[1], "jwt")
+        self.assertEqual(play[2], "https://movibox.net/movies/a-b")
+
+    def test_requests_do_not_ask_for_a_compressed_stream(self):
+        """Chunked gzip ends in IncompleteRead part-way through /home."""
+        self.assertEqual(movibox.api._headers()["Accept-Encoding"], "identity")
 
 
 if __name__ == "__main__":

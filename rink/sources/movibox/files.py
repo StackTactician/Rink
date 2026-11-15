@@ -8,6 +8,12 @@ from . import api, config, state
 
 logger = logging.getLogger(__name__)
 
+#: an empty answer is cached briefly, not for the files cache's five minutes:
+#: `hasResource: false` is also what a refused request looks like, so a blip
+#: must not become five minutes of a blank detail page
+_EMPTY_TTL = 30
+
+
 def _files(subject_id, path, se, ep):
     """One episode's files: [{resolution, url, size, codec}].
 
@@ -20,6 +26,13 @@ def _files(subject_id, path, se, ep):
 
     `/subject/download` is still asked when play comes back empty, so a title
     that only publishes downloads is not lost.
+
+    Both endpoints are gated on the same two things, and the play answer is
+    indistinguishable from "no files" when either is missing: the signed token
+    goes as a bearer, and the referer must be the player route
+    `/movies/<detailPath>`. Without the token the answer is still
+    `hasResource: false` with an empty stream list, which is exactly what a
+    title that has no files looks like.
     """
     key = (subject_id, path, se, ep)
 
@@ -57,4 +70,4 @@ def _files(subject_id, path, se, ep):
         out.sort(key=lambda f: -f["resolution"])
         return out
 
-    return state._files_cache.get_or_set(key, fetch)
+    return state._files_cache.get_or_set(key, fetch, empty_ttl=_EMPTY_TTL)
