@@ -74,8 +74,9 @@ def filename_for(direct):
 
 def download_file(direct, dest, referer, quiet=True):
     """Fetch direct -> dest with curl (resumable). Returns bytes written."""
-    cmd = ["curl", "-sS", "-L", "-f", "-C", "-", "-A", UA, "-e", referer,
-           "-o", dest, direct]
+    # `-g` keeps curl from reading [..] in a file name as a URL glob
+    cmd = ["curl", "-g", "-sS", "-L", "-f", "-C", "-", "-A", UA, "-e",
+           referer, "-o", dest, direct]
     if not quiet:
         cmd = [c for c in cmd if c != "-sS"]
     proc = subprocess.run(cmd)
